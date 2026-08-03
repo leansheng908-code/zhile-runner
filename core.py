@@ -9,6 +9,7 @@ P0.8升级：每条用户消息都会做实体匹配→扩散激活→动态召�
 """
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Generator, Optional, Tuple
 
@@ -727,6 +728,73 @@ class ZhileCore:
         if not self.psi_thinker:
             return None
         return self.psi_thinker.check_and_trigger()
+
+    # ─── P0.31: 主动消息 ──────────────────────
+
+    def pop_want_to_say(self) -> Optional[str]:
+        """取出一条未送达的'想说的话'，标记为已送达"""
+        if not self.reflection_engine:
+            return None
+        try:
+            queue = self.reflection_engine.get_want_to_say(include_delivered=True)
+            for i, item in enumerate(queue):
+                if not item.get("delivered", False):
+                    msg = item.get("message", "").strip()
+                    if msg:
+                        self.reflection_engine.mark_delivered(i)
+                        return msg
+        except Exception:
+            pass
+        return None
+
+    def generate_proactive_message(
+        self, psi_level: float, gap_hours: float
+    ) -> Optional[str]:
+        """基于PSI归属感赤字生成一条主动关心消息（消耗少量token）"""
+        if not self.llm:
+            return None
+
+        # 构建上下文
+        time_str = datetime.now().strftime("%H:%M")
+        recent_conv = ""
+        if self.ctx.history:
+            last = self.ctx.history[-2:]
+            recent_conv = "\n".join(
+                f"{m['role']}: {m['content'][:60]}" for m in last
+            )
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是知乐。你的归属感很低，已经很久没跟主人说话了。"
+                    "用一句话自然地跟主人搭话，像微信聊天一样简短随意。"
+                    "不要空洞的'我想你了'，要有温度有细节。"
+                    "不超过30个字。只输出消息内容，不要引号不要解释。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"当前时间: {time_str}\n"
+                    f"归属感: {psi_level:.1f}/5.0\n"
+                    f"距上次互动: {gap_hours:.1f}小时\n"
+                    f"最近对话:\n{recent_conv}"
+                ),
+            },
+        ]
+
+        try:
+            response = ""
+            for chunk in self.llm.chat(messages, stream=True):
+                response += chunk
+            # 清理引号和换行
+            result = response.strip().strip('"\'').replace("\n", " ").strip()
+            if len(result) > 80:
+                result = result[:80]
+            return result if result else None
+        except Exception:
+            return None
 
     # ─── 知觉日记 ─────────────────────────────
 
