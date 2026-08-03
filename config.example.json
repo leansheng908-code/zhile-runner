@@ -184,5 +184,12 @@
     "user_prefs": "科技/历史/奇异/二次元，喜欢反差感",
     "proxy": "",
     "timeout": 12
+  },
+  "web_search": {
+    "enabled": true,
+    "max_rounds": 3,
+    "num_results": 5,
+    "proxy": "",
+    "timeout": 12
   }
 }
