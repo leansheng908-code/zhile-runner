@@ -31,6 +31,7 @@ class QQAdapter:
         self.ws_conn = None
         self.self_id = None  # 机器人QQ号
         self._last_proactive_time = None
+        self._last_news_date = {}  # P0.33: 记录每天每个时段已推送的新闻 {window_key: "YYYY-MM-DD"}
 
     # ─── WS连接 ───────────────────────────────
 
@@ -328,6 +329,16 @@ class QQAdapter:
             return
         master_id = int(master_id)
 
+        # 优先级0：对话感知关心钩子（P0.32）
+        hook = self.core.pop_care_hook()
+        if hook:
+            message = self.core.generate_hook_message(hook)
+            if message:
+                await self._send_private(master_id, message)
+                self._last_proactive_time = now
+                print(f"  🪝 关心钩子已发送 [{hook.get('topic')}]: {message[:40]}")
+                return
+
         # 优先级1：投递"想说的话"队列
         msg = self.core.pop_want_to_say()
         if msg:
@@ -357,6 +368,69 @@ class QQAdapter:
                         await self._send_private(master_id, message)
                         self._last_proactive_time = now
                         print(f"  💌 主动关心已发送: {message[:40]}")
+
+    # ─── P0.33: 新闻推送 ─────────────────────
+
+    async def _news_loop(self, config: dict):
+        """后台新闻推送循环 — 每天定时推送有趣新闻"""
+        check_interval = config.get("check_interval", 600)  # 默认10分钟检查一次
+        push_windows = config.get("push_times", [9, 16])  # 默认9点和16点
+        quiet_start = config.get("quiet_hours_start", 23)
+        quiet_end = config.get("quiet_hours_end", 7)
+
+        while True:
+            await asyncio.sleep(check_interval)
+            try:
+                now = datetime.now()
+                hour = now.hour
+
+                # 免打扰时段
+                if quiet_start <= quiet_end:
+                    if quiet_start <= hour < quiet_end:
+                        continue
+                else:
+                    if hour >= quiet_start or hour < quiet_end:
+                        continue
+
+                # 检查是否在推送时间窗口内（±1小时）
+                in_window = False
+                window_key = None
+                for pt in push_windows:
+                    if abs(hour - pt) <= 1:
+                        in_window = True
+                        window_key = f"news_{pt}"
+                        break
+
+                if not in_window:
+                    continue
+
+                # 检查今天这个时段是否已推送
+                today = now.strftime("%Y-%m-%d")
+                if self._last_news_date.get(window_key) == today:
+                    continue
+
+                # 需要NapCat已连接
+                if not self.ws_conn:
+                    continue
+
+                master_id = self.core.config.get("qq", {}).get("master_id")
+                if not master_id:
+                    continue
+                master_id = int(master_id)
+
+                # 搜索并格式化新闻
+                print(f"  📰 开始搜索新闻...")
+                brief = self.core.search_and_format_news()
+                if brief:
+                    await self._send_private(master_id, brief)
+                    self._last_news_date[window_key] = today
+                    print(f"  📰 新闻已推送: {brief[:50]}")
+                else:
+                    print(f"  📰 新闻搜索无结果，跳过")
+                    self._last_news_date[window_key] = today  # 标记已尝试，避免重复
+
+            except Exception as e:
+                print(f"  ⚠ 新闻推送异常: {e}")
 
     # ─── 启动 ─────────────────────────────────
 
@@ -390,4 +464,9 @@ class QQAdapter:
             if proactive_config.get("enabled", False):
                 asyncio.create_task(self._proactive_loop(proactive_config))
                 print(f"  💌 主动消息已启用")
+            # P0.33: 启动新闻推送循环
+            news_config = self.core.config.get("news_push", {})
+            if news_config.get("enabled", False):
+                asyncio.create_task(self._news_loop(news_config))
+                print(f"  📰 新闻推送已启用 (每日{news_config.get('push_times', [9, 16])})")
             await asyncio.Future()  # run forever
