@@ -2,7 +2,7 @@
 """
 P0.33: 联网搜索 + 有趣新闻推送
 
-双引擎搜索：Bing中国版（直连） → DuckDuckGo（代理兜底），无需API Key。
+三引擎搜索：百度（直连） → Bing中国版（直连） → DuckDuckGo（代理兜底），无需API Key。
 每天定时推送：上午9点 + 下午4点。
 
 搜索流程：
@@ -22,7 +22,7 @@ from typing import List, Dict, Optional
 
 
 class WebSearcher:
-    """联网搜索器 — Bing直连 + DuckDuckGo代理兜底"""
+    """联网搜索器 — 百度直连 + Bing直连 + DuckDuckGo代理兜底"""
 
     def __init__(self, config: dict):
         self.config = config or {}
@@ -30,19 +30,93 @@ class WebSearcher:
         self.proxy = self.config.get("proxy", "")  # 如 http://127.0.0.1:7890
 
     def search(self, query: str, num_results: int = 5) -> List[Dict[str, str]]:
-        """搜索：先试Bing直连，失败走DuckDuckGo+代理"""
-        # 引擎1：Bing中国版（国内直连）
+        """搜索：百度 → Bing → DuckDuckGo，依次尝试"""
+        # 引擎1：百度（国内直连，最稳定）
+        results = self._search_baidu(query, num_results)
+        if results:
+            return results
+
+        # 引擎2：Bing中国版（国内直连）
         results = self._search_bing(query, num_results)
         if results:
             return results
 
-        # 引擎2：DuckDuckGo（可能需要代理）
+        # 引擎3：DuckDuckGo（可能需要代理）
         results = self._search_ddg(query, num_results)
         if results:
             return results
 
         print(f"  ⚠ 所有搜索引擎均失败 [{query}]")
         return []
+
+    def _search_baidu(self, query: str, num: int) -> List[Dict[str, str]]:
+        """百度搜索（国内直连，无需代理）"""
+        url = f"https://www.baidu.com/s?wd={urllib.parse.quote(query)}&rn={num}"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (X11; Linux x86_64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/125.0.0.0 Safari/537.36"
+                ),
+                "Accept": "text/html,application/xhtml+xml",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                "Cache-Control": "no-cache",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                html = resp.read().decode("utf-8", errors="ignore")
+            results = self._parse_baidu(html, num)
+            if not results:
+                print(f"  ⚠ 百度搜索返回0条结果 (HTML {len(html)} bytes)")
+            return results
+        except Exception as e:
+            print(f"  ⚠ 百度搜索失败: {e}")
+            return []
+
+    def _parse_baidu(self, html: str, num: int) -> List[Dict[str, str]]:
+        """解析百度搜索结果"""
+        results = []
+
+        # 百度搜索结果多种格式，逐个尝试
+        # 格式1: <h3 class="t"><a href="...">title</a></h3>
+        # 格式2: <h3><a href="...">title</a></h3>
+        title_patterns = [
+            re.compile(r'<h3[^>]*>\s*<a[^>]*>(.*?)</a>', re.DOTALL),
+            re.compile(r'<h3[^>]*>(.*?)</h3>', re.DOTALL),
+        ]
+        titles = []
+        for tp in title_patterns:
+            titles = tp.findall(html)
+            if titles:
+                break
+
+        # 摘要多种格式
+        snippet_patterns = [
+            re.compile(r'class="content-right[^"]*"[^>]*>(.*?)</span>', re.DOTALL),
+            re.compile(r'class="c-abstract[^"]*"[^>]*>(.*?)</(?:div|span)>', re.DOTALL),
+            re.compile(r'<span class="c-color-text"[^>]*>(.*?)</span>', re.DOTALL),
+        ]
+        snippets = []
+        for sp in snippet_patterns:
+            snippets = sp.findall(html)
+            if snippets:
+                break
+
+        for i in range(min(num, len(titles))):
+            title = self._strip_html(titles[i]).strip()
+            snippet = ""
+            if i < len(snippets):
+                snippet = self._strip_html(snippets[i]).strip()
+            if title and len(title) > 2:
+                results.append({
+                    "title": title,
+                    "snippet": snippet[:200] if snippet else "",
+                })
+
+        return results
 
     def _search_bing(self, query: str, num: int) -> List[Dict[str, str]]:
         """Bing中国版搜索（国内直连，无需代理）"""
@@ -53,40 +127,53 @@ class WebSearcher:
                 "User-Agent": (
                     "Mozilla/5.0 (X11; Linux x86_64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
+                    "Chrome/125.0.0.0 Safari/537.36"
                 ),
                 "Accept": "text/html,application/xhtml+xml",
                 "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                "Cache-Control": "no-cache",
             },
         )
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 html = resp.read().decode("utf-8", errors="ignore")
-            return self._parse_bing(html, num)
+            results = self._parse_bing(html, num)
+            if not results:
+                print(f"  ⚠ Bing搜索返回0条结果 (HTML {len(html)} bytes)")
+            return results
         except Exception as e:
             print(f"  ⚠ Bing搜索失败: {e}")
             return []
 
     def _parse_bing(self, html: str, num: int) -> List[Dict[str, str]]:
-        """解析Bing搜索结果"""
+        """解析Bing搜索结果（多种格式兼容）"""
         results = []
 
-        # Bing搜索结果格式：
-        # <li class="b_algo"><h2><a href="...">标题</a></h2>
-        # <p class="b_lineclamp...">摘要</p> 或 <div class="b_caption"><p>摘要</p>
+        # Bing HTML结构经常变，多种正则兼容
+        # 格式1: <h2><a href="...">title</a></h2>
+        # 格式2: <h2 class="..."><a href="...">title</a></h2>
+        title_patterns = [
+            re.compile(r'<h2[^>]*>\s*<a[^>]*>(.*?)</a>', re.DOTALL),
+            re.compile(r'class="b_algo"[^>]*>.*?<a[^>]*>(.*?)</a>', re.DOTALL),
+            re.compile(r'<h2[^>]*>(.*?)</h2>', re.DOTALL),
+        ]
+        titles = []
+        for tp in title_patterns:
+            titles = tp.findall(html)
+            if titles:
+                break
 
-        # 提取标题（在<h2><a>标签内）
-        title_pattern = re.compile(
-            r'<h2>\s*<a[^>]*>(.*?)</a>', re.DOTALL
-        )
-        titles = title_pattern.findall(html)
-
-        # 提取摘要（在b_caption的p标签内）
-        snippet_pattern = re.compile(
-            r'<div class="b_caption"[^>]*>.*?<p[^>]*>(.*?)</p>',
-            re.DOTALL | re.IGNORECASE
-        )
-        snippets = snippet_pattern.findall(html)
+        # 摘要多种格式
+        snippet_patterns = [
+            re.compile(r'<div class="b_caption"[^>]*>.*?<p[^>]*>(.*?)</p>', re.DOTALL | re.IGNORECASE),
+            re.compile(r'class="b_lineclamp[^"]*"[^>]*>(.*?)</p>', re.DOTALL),
+            re.compile(r'class="b_caption"[^>]*>(.*?)</div>', re.DOTALL | re.IGNORECASE),
+        ]
+        snippets = []
+        for sp in snippet_patterns:
+            snippets = sp.findall(html)
+            if snippets:
+                break
 
         for i in range(min(num, len(titles))):
             title = self._strip_html(titles[i]).strip()
@@ -102,7 +189,7 @@ class WebSearcher:
         return results
 
     def _search_ddg(self, query: str, num: int) -> List[Dict[str, str]]:
-        """DuckDuckGo搜索（可能需要代理）"""
+        """DuckDuckGo搜索（需要代理）"""
         url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
         req = urllib.request.Request(
             url,
@@ -110,7 +197,7 @@ class WebSearcher:
                 "User-Agent": (
                     "Mozilla/5.0 (X11; Linux x86_64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
+                    "Chrome/125.0.0.0 Safari/537.36"
                 ),
                 "Accept": "text/html,application/xhtml+xml",
                 "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
@@ -130,7 +217,10 @@ class WebSearcher:
         try:
             with opener.open(req, timeout=self.timeout) as resp:
                 html = resp.read().decode("utf-8", errors="ignore")
-            return self._parse_ddg(html, num)
+            results = self._parse_ddg(html, num)
+            if not results:
+                print(f"  ⚠ DDG搜索返回0条结果 (HTML {len(html)} bytes)")
+            return results
         except Exception as e:
             print(f"  ⚠ DuckDuckGo搜索失败: {e}")
             return []
@@ -236,3 +326,46 @@ class WebSearcher:
                 r = results[0]
                 return f"📰 {r['title']}"
             return None
+
+
+# ===== 独立测试模式 =====
+if __name__ == "__main__":
+    import sys
+
+    print("=" * 50)
+    print("WebSearcher 独立测试")
+    print("=" * 50)
+
+    config = {
+        "timeout": 15,
+        "proxy": "http://127.0.0.1:7890",
+    }
+    searcher = WebSearcher(config)
+
+    query = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else "2026年8月 有趣新闻 科技"
+    print(f"\n搜索: {query}\n")
+
+    # 测试百度
+    print("--- 百度 ---")
+    baidu_results = searcher._search_baidu(query, 5)
+    for i, r in enumerate(baidu_results, 1):
+        print(f"  [{i}] {r['title']}")
+        if r['snippet']:
+            print(f"      {r['snippet'][:80]}")
+
+    # 测试Bing
+    print("\n--- Bing ---")
+    bing_results = searcher._search_bing(query, 5)
+    for i, r in enumerate(bing_results, 1):
+        print(f"  [{i}] {r['title']}")
+        if r['snippet']:
+            print(f"      {r['snippet'][:80]}")
+
+    # 测试综合搜索
+    print("\n--- 综合搜索 ---")
+    all_results = searcher.search(query, 5)
+    print(f"共 {len(all_results)} 条结果")
+    for i, r in enumerate(all_results, 1):
+        print(f"  [{i}] {r['title']}")
+        if r['snippet']:
+            print(f"      {r['snippet'][:80]}")
