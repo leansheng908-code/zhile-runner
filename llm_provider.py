@@ -75,6 +75,52 @@ class LLMProvider:
             content = data["choices"][0]["message"]["content"]
             yield content
 
+    def chat_with_tools(self, messages: list, tools: list) -> tuple:
+        """非流式调用，支持function calling。返回 (content, tool_calls)"""
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+        }
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            "max_tokens": self.max_tokens,
+            "frequency_penalty": self.frequency_penalty,
+            "presence_penalty": self.presence_penalty,
+            "stream": False,
+            "tools": tools,
+            "tool_choice": "auto",
+        }
+
+        try:
+            response = requests.post(
+                f"{self.base_url}/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=60,
+            )
+            response.raise_for_status()
+        except requests.exceptions.ConnectionError:
+            raise ConnectionError("无法连接API服务器，请检查网络或VPN")
+        except requests.exceptions.Timeout:
+            raise TimeoutError("API请求超时（60s）")
+        except requests.exceptions.HTTPError as e:
+            error_msg = f"API错误 ({response.status_code})"
+            try:
+                detail = response.json().get("error", {})
+                error_msg += f": {detail.get('message', str(e))}"
+            except Exception:
+                error_msg += f": {str(e)}"
+            raise Exception(error_msg)
+
+        data = response.json()
+        choice = data["choices"][0]["message"]
+        content = choice.get("content") or ""
+        tool_calls = choice.get("tool_calls")
+        return content, tool_calls
+
     def _parse_stream(self, response) -> Generator[str, None, None]:
         """解析SSE流式响应"""
         for line in response.iter_lines():
