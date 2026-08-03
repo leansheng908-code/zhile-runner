@@ -372,6 +372,12 @@ class ZhileCore:
         news_config = self.config.get("news_push", {})
         self.web_searcher = WebSearcher(config=news_config) if news_config.get("enabled", True) else None
 
+        # P0.34: 对话感知联网搜索（Function Calling）
+        ws_config = self.config.get("web_search", {})
+        self.web_search_enabled = ws_config.get("enabled", True) and self.web_searcher is not None
+        self.web_search_max_rounds = ws_config.get("max_rounds", 3)
+        self.web_search_num_results = ws_config.get("num_results", 5)
+
     @staticmethod
     def _load_config(config_path: str) -> dict:
         path = Path(config_path)
@@ -527,9 +533,98 @@ class ZhileCore:
         import time as _time
         _t0 = _time.time()
         full_response = ""
-        for chunk in self.llm.chat(messages, stream=True):
-            full_response += chunk
-            yield chunk
+
+        # P0.34: 对话感知联网搜索（Function Calling）
+        if self.web_search_enabled and self.web_searcher:
+            search_rounds = 0
+            tool_def = [{
+                "type": "function",
+                "function": {
+                    "name": "web_search",
+                    "description": "搜索互联网获取实时信息。当用户询问最新新闻、天气、价格、事实或你不确定的信息时使用。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "搜索关键词"},
+                            "num_results": {"type": "integer", "description": "返回结果数量，默认5", "default": 5}
+                        },
+                        "required": ["query"]
+                    }
+                }
+            }]
+
+            while search_rounds < self.web_search_max_rounds:
+                try:
+                    content, tool_calls = self.llm.chat_with_tools(
+                        messages if search_rounds == 0 else messages,
+                        tool_def if search_rounds == 0 else tool_def
+                    )
+                except Exception as e:
+                    print(f"⚠ [P0.34] 工具调用失败，降级为普通对话: {e}")
+                    break
+
+                if not tool_calls:
+                    # 模型不需要搜索，直接用content
+                    if content:
+                        full_response = content
+                        yield content
+                        break
+                    else:
+                        break
+                else:
+                    # 模型请求搜索
+                    for tc in tool_calls:
+                        fn_name = tc.get("function", {}).get("name", "")
+                        if fn_name != "web_search":
+                            continue
+                        try:
+                            args = json.loads(tc["function"]["arguments"])
+                        except Exception:
+                            args = {"query": tc["function"].get("arguments", "")}
+
+                        query = args.get("query", "")
+                        num_r = args.get("num_results", self.web_search_num_results)
+                        print(f"🔍 [P0.34] 搜索: {query}")
+
+                        results = self.web_searcher.search(query, num_r)
+                        results_text = "\n".join(
+                            f"[{i+1}] {r['title']}: {r.get('snippet', '')[:120]}"
+                            for i, r in enumerate(results)
+                        ) if results else "未找到相关结果"
+
+                        messages.append({
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [{
+                                "id": tc["id"],
+                                "type": "function",
+                                "function": {
+                                    "name": "web_search",
+                                    "arguments": tc["function"]["arguments"]
+                                }
+                            }]
+                        })
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc["id"],
+                            "content": results_text
+                        })
+
+                    search_rounds += 1
+                    # 最后一轮不再带tools，让模型直接回复
+                    if search_rounds >= self.web_search_max_rounds:
+                        tool_def = []
+
+            # 如果工具调用后有消息追加，做一次流式输出
+            if not full_response:
+                for chunk in self.llm.chat(messages, stream=True):
+                    full_response += chunk
+                    yield chunk
+        else:
+            # 普通流式调用
+            for chunk in self.llm.chat(messages, stream=True):
+                full_response += chunk
+                yield chunk
 
         # P0.4: 插件 LLM后钩子
         if self.plugin_manager:
