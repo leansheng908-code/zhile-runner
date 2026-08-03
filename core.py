@@ -45,6 +45,11 @@ from self_roadmap import SelfRoadmap
 from code_executor import CodeExecutor
 from debug_loop import DebugLoop
 
+# P0.32: 对话感知关心钩子
+from care_hooks import CareHookManager
+# P0.33: 联网搜索 + 新闻推送
+from web_searcher import WebSearcher
+
 # P0.24: 易经认知编码系统
 import sys as _sys, os as _os
 _yi_jing_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'yi_jing')
@@ -355,6 +360,18 @@ class ZhileCore:
             data_path=roadmap_config.get("path", f"{mem_dir}/self_roadmap.json"),
         ) if roadmap_config.get("enabled", True) else None
 
+        # P0.32: 对话感知关心钩子
+        hook_config = self.config.get("care_hooks", {})
+        self.care_hooks = CareHookManager(
+            data_dir=str(mem_dir / "care_hooks"),
+            config=hook_config,
+            llm=self.llm,
+        ) if hook_config.get("enabled", True) else None
+
+        # P0.33: 联网搜索 + 新闻推送
+        news_config = self.config.get("news_push", {})
+        self.web_searcher = WebSearcher(config=news_config) if news_config.get("enabled", True) else None
+
     @staticmethod
     def _load_config(config_path: str) -> dict:
         path = Path(config_path)
@@ -431,6 +448,12 @@ class ZhileCore:
                         pass
                 # P0.21 L1: 自动记忆提取
                 self.maybe_auto_extract()
+                # P0.32: 提取关心钩子
+                if self.care_hooks:
+                    try:
+                        self.care_hooks.extract_hooks(message, shortcut, self._turn_count)
+                    except Exception:
+                        pass
                 return
 
         # P0.8/P0.25: 动态记忆检索 — 卦象加权版
@@ -572,6 +595,16 @@ class ZhileCore:
         if extract_result.get("extracted"):
             import sys as _sys
             print(f"📝 [自动记忆提取] 提取了{extract_result['count']}条记忆", file=_sys.stderr)
+
+        # P0.32: 提取关心钩子
+        if self.care_hooks:
+            try:
+                _hooks = self.care_hooks.extract_hooks(message, full_response, self._turn_count)
+                if _hooks:
+                    import sys as _sys
+                    print(f"🪝 [关心钩子] 提取{len(_hooks)}个: {[h['topic'] for h in _hooks]}", file=_sys.stderr)
+            except Exception:
+                pass
 
     def chat_sync(self, message: str) -> str:
         """非流式对话，返回完整回复"""
@@ -794,6 +827,51 @@ class ZhileCore:
                 result = result[:80]
             return result if result else None
         except Exception:
+            return None
+
+    # ─── P0.32: 对话感知关心钩子 ─────────────
+
+    def pop_care_hook(self) -> Optional[dict]:
+        """取出一个到期的关心钩子（最高优先级）"""
+        if not self.care_hooks:
+            return None
+        try:
+            return self.care_hooks.pop_due_hook()
+        except Exception:
+            return None
+
+    def generate_hook_message(self, hook: dict) -> Optional[str]:
+        """基于钩子上下文生成针对性关心消息"""
+        if not self.care_hooks or not hook:
+            return None
+        try:
+            return self.care_hooks.generate_hook_message(hook)
+        except Exception:
+            return None
+
+    # ─── P0.33: 联网搜索 + 新闻推送 ───────────
+
+    def search_and_format_news(self) -> Optional[str]:
+        """搜索新闻并用LLM格式化为简短播报"""
+        if not self.web_searcher:
+            return None
+        try:
+            news_config = self.config.get("news_push", {})
+            topics = news_config.get("topics", ["科技", "二次元", "奇闻异事", "历史"])
+            num_per_topic = news_config.get("max_results_per_topic", 3)
+            user_prefs = news_config.get("user_prefs", "")
+
+            # 搜索
+            results = self.web_searcher.search_news(topics, num_per_topic)
+            if not results:
+                return None
+
+            # LLM筛选格式化
+            brief = self.web_searcher.format_news_brief(results, self.llm, user_prefs)
+            return brief
+        except Exception as e:
+            import sys
+            print(f"⚠ [新闻推送] 失败: {e}", file=sys.stderr)
             return None
 
     # ─── 知觉日记 ─────────────────────────────
