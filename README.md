@@ -833,9 +833,8 @@ netstat -ano | findstr 6199
 
 ## 相关链接
 
-- **DNA 仓库**：[zhile-dna](https://github.com/leansheng908-code/zhile-dna)
 - **NapCat（QQ框架）**：[NapCatQQ](https://github.com/NapNeko/NapCatQQ)
-- **DeepSeek 开放平台**：[platform.deepseek.com](https://platform.deepseek.com/)
+- **DeepSeek（推荐LLM）**：[platform.deepseek.com](https://platform.deepseek.com/)
 
 ---
 
