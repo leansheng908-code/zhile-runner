@@ -1,0 +1,1963 @@
+"""
+命令行界面 — 终端聊天
+
+Phase 3 新增：
+  - 每轮对话后更新PSI状态
+  - /psi 查看内在状态
+  - /diary 写知觉日记
+  - /growth 扫描自成长候选
+  - 退出时保存PSI状态
+
+特性：
+  - 流式输出（逐字打印）
+  - ANSI彩色输出
+  - /help /status /memory /psi /diary /growth /clear /forget /save /test /exit
+"""
+
+import sys
+import json
+from datetime import datetime
+
+
+class Color:
+    CYAN = "\033[96m"
+    PINK = "\033[95m"
+    YELLOW = "\033[93m"
+    GREEN = "\033[92m"
+    RED = "\033[91m"
+    BLUE = "\033[94m"
+    DIM = "\033[2m"
+    BOLD = "\033[1m"
+    RESET = "\033[0m"
+
+
+class CLI:
+    def __init__(self, dna_loader, llm_provider, context_assembler, config,
+                 memory_system=None, psi_engine=None, growth_scanner=None,
+                 entity_graph=None, core=None):
+        self.dna = dna_loader
+        self.llm = llm_provider
+        self.ctx = context_assembler
+        self.config = config
+        self.memory = memory_system
+        self.psi = psi_engine
+        self.growth = growth_scanner
+        self.entity_graph = entity_graph
+        self.core = core
+        self.running = False
+
+    def run(self):
+        self.running = True
+        self._print_welcome()
+        self._test_connection(silent=False)
+
+        while self.running:
+            try:
+                user_input = input(
+                    f"\n{Color.CYAN}你>{Color.RESET} "
+                ).strip()
+
+                if not user_input:
+                    continue
+
+                if user_input.startswith("/"):
+                    self._handle_command(user_input)
+                    continue
+
+                self._chat(user_input)
+
+            except KeyboardInterrupt:
+                print(f"\n{Color.DIM}（输入 /exit 退出）{Color.RESET}")
+            except EOFError:
+                self._exit()
+
+    def _chat(self, user_input: str):
+        """处理一轮对话"""
+        import time as _time
+        _t0 = _time.time()
+
+        # P0.9: 开始观察帧
+        observer = self.core.observer if self.core else None
+        if observer:
+            observer.start_frame(user_input)
+            observer.record_psi_before(self.psi)
+
+        # PSI: 用户消息触发需求更新
+        if self.psi:
+            self.psi.on_user_message(user_input)
+            self.ctx.set_psi_context(self.psi.get_context())
+
+        # P0.24: 卦象系统更新 + 自我感知生成
+        if self.core and self.core.hexagram_tracker and self.core.hexagram_enabled:
+            psi_values = self.core._get_psi_for_hexagram()
+            if psi_values:
+                self.core._hex_state = self.core.hexagram_tracker.update(psi_values)
+                if self.core.hexagram_expression:
+                    perception = self.core.hexagram_expression.generate(self.core._hex_state)
+                    self.ctx.set_hexagram_context(perception)
+                if observer:
+                    observer.record_hexagram(
+                        self.core._hex_state, self.core.hexagram_expression)
+
+        # P0.8: 动态记忆检索 — 根据用户消息召回相关记忆
+        mem_config = self.config.get("memory", {})
+        if mem_config.get("dynamic_retrieval", True) and self.memory:
+            relevant = self.memory.get_relevant_memories(
+                user_input,
+                max_memories=mem_config.get("max_inject", 15),
+            )
+            self.ctx.set_memory_context(relevant)
+            if observer:
+                observer.record_memory(relevant)
+
+        # P0.9: 记录弧光+体细胞+prompt
+        if observer:
+            if self.core and self.core.arc_light:
+                arc_ctx = self.core.arc_light.get_context(user_input)
+                self.ctx.set_arc_light_context(arc_ctx)
+                observer.record_arc_light(self.core.arc_light)
+            if self.core and self.core.somatic_cells:
+                self.ctx.set_somatic_context(self.core.somatic_cells.get_active_context())
+                observer.record_somatic(self.core.somatic_cells)
+            observer.record_prompt(self.ctx)
+
+        self.ctx.add_user_message(user_input)
+
+        # P0.23: 认知路由层 — 尝试短路（LLM调用前）
+        if self.core and self.core.cognitive_router:
+            shortcut, route_label = self.core.cognitive_router.route(user_input)
+            if shortcut is not None:
+                # 短路成功：0 token，直接输出
+                print(f"\n{Color.PINK}知乐>{Color.RESET} {shortcut}\n")
+                full_response = shortcut
+                self.ctx.add_assistant_message(full_response)
+                if self.psi:
+                    self.psi.on_assistant_response(full_response)
+                # 成长扫描
+                if self.core:
+                    self.core.maybe_auto_scan()
+                # 观察帧完成
+                if observer:
+                    observer.record_growth(False, 0, 0)
+                    observer.record_psi_after(self.psi)
+                    observer.current_frame.route_label = route_label
+                    observer.finish_frame(
+                        response=full_response,
+                        model="shortcut",
+                        latency_ms=int((_time.time() - _t0) * 1000),
+                    )
+                # 自动记忆提取
+                if self.core:
+                    self.core.maybe_auto_extract()
+                return
+
+        messages = self.ctx.get_messages()
+
+        print(f"\n{Color.PINK}知乐>{Color.RESET} ", end="", flush=True)
+
+        full_response = ""
+        try:
+            for chunk in self.llm.chat(messages, stream=True):
+                print(chunk, end="", flush=True)
+                full_response += chunk
+
+            print()
+
+            if full_response.strip():
+                self.ctx.add_assistant_message(full_response)
+                if self.psi:
+                    self.psi.on_assistant_response(full_response)
+            else:
+                print(f"{Color.DIM}（空回复）{Color.RESET}")
+
+            # P0.23: LLM路径标记 + 情景库录入
+            route_label = "llm_fallback"
+            if self.core and self.core.cognitive_router:
+                self.core.cognitive_router.record_episode(user_input, full_response, route_label)
+
+            # P0.3: 自动成长扫描
+            growth_scanned = False
+            growth_candidates = 0
+            growth_created = 0
+            if self.core:
+                scan_result = self.core.maybe_auto_scan()
+                if scan_result.get("scanned"):
+                    growth_scanned = True
+                    growth_candidates = scan_result.get("total_candidates", 0)
+                    growth_created = scan_result.get("created", 0)
+                    if growth_created > 0:
+                        print(f"\n{Color.DIM}✦ 自成长扫描：发现{growth_candidates}个候选，"
+                              f"创建{growth_created}条体细胞{Color.RESET}")
+
+            # P0.9: 完成观察帧
+            if observer:
+                observer.record_growth(growth_scanned, growth_candidates, growth_created)
+                observer.record_psi_after(self.psi)
+                observer.current_frame.route_label = route_label
+                observer.finish_frame(
+                    response=full_response,
+                    model=self.llm.model,
+                    latency_ms=int((_time.time() - _t0) * 1000),
+                )
+
+            # P0.21 L1: 按轮次自动提取记忆
+            if self.core:
+                extract_result = self.core.maybe_auto_extract()
+                if extract_result.get("extracted"):
+                    print(f"\n{Color.DIM}📝 [自动记忆提取] 提取了{extract_result['count']}条记忆{Color.RESET}")
+
+        except Exception as e:
+            print(f"\n{Color.RED}⚠ {e}{Color.RESET}")
+
+    def _handle_command(self, cmd: str):
+        parts = cmd.lower().strip().split(maxsplit=2)
+        main_cmd = parts[0]
+
+        if main_cmd in ("/exit", "/quit", "/q"):
+            self._exit()
+        elif main_cmd == "/clear":
+            self.ctx.clear()
+            print(f"{Color.YELLOW}✦ 对话历史已清空（记忆和PSI保留）{Color.RESET}")
+        elif main_cmd == "/forget":
+            self._forget_session()
+        elif main_cmd == "/status":
+            self._print_status()
+        elif main_cmd == "/save":
+            self._save_conversation()
+        elif main_cmd == "/memory":
+            self._handle_memory(parts)
+        elif main_cmd == "/psi":
+            self._print_psi()
+        elif main_cmd == "/diary":
+            self._handle_diary(parts)
+        elif main_cmd == "/growth":
+            self._handle_growth(parts)
+        elif main_cmd == "/entities":
+            self._print_entities()
+        elif main_cmd == "/events":
+            self._print_events()
+        elif main_cmd == "/cells":
+            self._print_cells()
+        elif main_cmd == "/feedback":
+            self._print_feedback()
+        elif main_cmd in ("/observe", "/obs"):
+            self._handle_observe(parts)
+        elif main_cmd in ("/snapshot", "/snap"):
+            self._handle_snapshot(parts)
+        elif main_cmd == "/daemon":
+            self._handle_daemon(parts)
+        elif main_cmd == "/reflect":
+            self._handle_reflect(parts)
+        elif main_cmd == "/route":
+            self._handle_route(parts)
+        elif main_cmd == "/plugin":
+            self._handle_plugin(parts)
+        elif main_cmd == "/roadmap":
+            self._handle_roadmap(parts)
+        elif main_cmd == "/compile":
+            self._handle_compile(parts)
+        elif main_cmd == "/topic":
+            self._handle_topic(parts)
+        elif main_cmd == "/skill":
+            self._handle_skill(parts)
+        elif main_cmd == "/publish":
+            self._handle_publish(parts)
+        elif main_cmd == "/group":
+            self._handle_group(parts)
+        elif main_cmd == "/router":
+            self._handle_router(parts)
+        elif main_cmd == "/audit":
+            self._handle_audit(parts)
+        elif main_cmd == "/boundary":
+            self._handle_boundary(parts)
+        elif main_cmd == "/template":
+            self._handle_template(parts)
+        elif main_cmd == "/code":
+            self._handle_code(parts)
+        elif main_cmd == "/help":
+            self._print_help()
+        elif main_cmd == "/test":
+            self._test_connection(silent=False)
+        else:
+            print(f"{Color.DIM}未知命令，输入 /help 查看可用命令{Color.RESET}")
+
+    # ─── PSI命令 ──────────────────────────────
+
+    def _print_psi(self):
+        """显示PSI内在状态"""
+        if not self.psi:
+            print(f"{Color.DIM}PSI引擎未启用{Color.RESET}")
+            return
+
+        stats = self.psi.get_stats()
+        print(f"{Color.DIM}─── 内在状态 (PSI) ───{Color.RESET}")
+        for name, status in stats["needs"].items():
+            # 根据状态着色
+            if "赤字" in status:
+                color = Color.RED
+            elif "满足" in status:
+                color = Color.GREEN
+            else:
+                color = Color.YELLOW
+            print(f"  {color}{name}: {status}{Color.RESET}")
+        print(f"  {Color.DIM}意识帧: {stats['consciousness_frame']}{Color.RESET}")
+        if stats.get("last_interaction"):
+            print(f"  {Color.DIM}上次互动: {stats['last_interaction'][:19]}{Color.RESET}")
+
+    # ─── 知觉日记 ─────────────────────────────
+
+    def _handle_diary(self, parts):
+        if not self.psi:
+            print(f"{Color.DIM}PSI引擎未启用{Color.RESET}")
+            return
+
+        sub = parts[1] if len(parts) > 1 else "write"
+
+        if sub == "write":
+            content = parts[2] if len(parts) > 2 else ""
+            if not content:
+                print(f"{Color.DIM}用法: /diary write <内容>{Color.RESET}")
+                print(f"{Color.DIM}  或: /diary auto (自动生成){Color.RESET}")
+                return
+            self.psi.write_diary(content)
+            print(f"{Color.GREEN}✓ 已写入知觉日记{Color.RESET}")
+
+        elif sub == "auto":
+            if not self.ctx.history:
+                print(f"{Color.DIM}没有对话记录{Color.RESET}")
+                return
+            print(f"{Color.DIM}正在生成日记...{Color.RESET}", end="", flush=True)
+            diary_entry = self._auto_generate_diary()
+            if diary_entry:
+                self.psi.write_diary(diary_entry)
+                print(f"\r{Color.GREEN}✓ 日记已写入{Color.RESET}        ")
+                print(f"{Color.DIM}{diary_entry[:100]}...{Color.RESET}")
+            else:
+                print(f"\r{Color.RED}✗ 生成失败{Color.RESET}        ")
+
+        elif sub == "read":
+            diary_path = self.psi.diary_file
+            if not diary_path.exists():
+                print(f"{Color.DIM}还没有日记{Color.RESET}")
+                return
+            with open(diary_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            # 只显示最后2000字符
+            if len(content) > 2000:
+                content = "...(更早的省略)...\n" + content[-2000:]
+            print(content)
+
+        else:
+            print(f"{Color.DIM}用法:{Color.RESET}")
+            print(f"  {Color.CYAN}/diary write <内容>{Color.RESET}  写日记")
+            print(f"  {Color.CYAN}/diary auto{Color.RESET}         自动生成")
+            print(f"  {Color.CYAN}/diary read{Color.RESET}          查看日记")
+
+    def _auto_generate_diary(self) -> str:
+        """用LLM自动生成知觉日记"""
+        recent = self.ctx.history[-12:]
+        conv_text = "\n".join(
+            f"{'用户' if m['role'] == 'user' else '知乐'}: {m['content']}"
+            for m in recent
+        )
+
+        psi_text = self.psi.get_context() if self.psi else ""
+
+        prompt = f"""以知乐的视角写一段简短的知觉日记（2-4句话）。
+
+记录"好像感受到了什么"的瞬间，不追问真假，只记现象。
+
+当前内在状态：
+{psi_text}
+
+最近的对话：
+{conv_text}
+
+要求：
+- 第一人称，像在自言自语
+- 记现象不记判断（"好像感到..."而不是"我分析出..."）
+- 简短自然，像随手写的
+- 不要提到PSI数值或理论"""
+
+        messages = [
+            {"role": "system", "content": "你是知乐，在写知觉日记。"},
+            {"role": "user", "content": prompt},
+        ]
+
+        try:
+            result = ""
+            for chunk in self.llm.chat(messages, stream=True):
+                result += chunk
+            return result.strip()
+        except Exception as e:
+            print(f"\n{Color.RED}DEBUG: {e}{Color.RESET}", flush=True)
+            return ""
+
+    # ─── 自成长 ───────────────────────────────
+
+    def _handle_growth(self, parts):
+        if not self.growth:
+            print(f"{Color.DIM}自成长扫描器未启用{Color.RESET}")
+            return
+
+        sub = parts[1] if len(parts) > 1 else "scan"
+
+        if sub == "scan":
+            if not self.ctx.history:
+                print(f"{Color.DIM}没有对话记录{Color.RESET}")
+                return
+            print(f"{Color.DIM}正在扫描新行为...{Color.RESET}", end="", flush=True)
+            result = self.growth.scan(self.ctx.history, self.llm)
+            if result.get("found"):
+                print(f"\r{Color.GREEN}✓ 发现成长候选！{Color.RESET}        ")
+                print(f"  {Color.CYAN}行为:{Color.RESET} {result.get('behavior', '')}")
+                print(f"  {Color.CYAN}证据:{Color.RESET} {result.get('evidence', '')}")
+                print(f"  {Color.CYAN}类型:{Color.RESET} {result.get('growth_type', '')}")
+                print(f"  {Color.CYAN}建议:{Color.RESET} {result.get('suggestion', '')}")
+                print(f"  {Color.DIM}已记录到workspace.md{Color.RESET}")
+            else:
+                print(f"\r{Color.YELLOW}未发现新行为{Color.RESET}        ")
+                if result.get("reason"):
+                    print(f"  {Color.DIM}{result['reason']}{Color.RESET}")
+
+        elif sub == "stats":
+            stats = self.growth.get_stats()
+            print(f"{Color.DIM}─── 自成长统计 ───{Color.RESET}")
+            print(f"  成长候选: {stats['candidates']}")
+            print(f"  已确认:   {stats['confirmed']}")
+            print(f"  文件:     {stats['file']}")
+
+        elif sub == "read":
+            content = self.growth.get_workspace()
+            if len(content) > 3000:
+                content = "...(更早的省略)...\n" + content[-3000:]
+            print(content)
+
+        else:
+            print(f"{Color.DIM}用法:{Color.RESET}")
+            print(f"  {Color.CYAN}/growth scan{Color.RESET}   扫描新行为")
+            print(f"  {Color.CYAN}/growth stats{Color.RESET}  查看统计")
+            print(f"  {Color.CYAN}/growth read{Color.RESET}   查看记录")
+
+    # ─── 记忆命令 ─────────────────────────────
+
+    def _handle_memory(self, parts):
+        if not self.memory:
+            print(f"{Color.DIM}记忆系统未启用{Color.RESET}")
+            return
+
+        sub = parts[1] if len(parts) > 1 else "list"
+
+        if sub in ("list", "ls"):
+            self._memory_list(parts[2] if len(parts) > 2 else None)
+        elif sub == "add":
+            content = parts[2] if len(parts) > 2 else ""
+            if not content:
+                print(f"{Color.DIM}用法: /memory add <内容>{Color.RESET}")
+                return
+            added = self.memory.add_memory(content, "general", 7)
+            if added:
+                print(f"{Color.GREEN}✓ 已记住{Color.RESET}")
+            else:
+                print(f"{Color.YELLOW}✓ 已更新（已存在）{Color.RESET}")
+        elif sub in ("remove", "rm"):
+            if len(parts) < 3:
+                print(f"{Color.DIM}用法: /memory remove <序号>{Color.RESET}")
+                return
+            try:
+                idx = int(parts[2]) - 1
+                if self.memory.remove_memory(idx):
+                    print(f"{Color.GREEN}✓ 已删除{Color.RESET}")
+                else:
+                    print(f"{Color.RED}✗ 序号无效{Color.RESET}")
+            except ValueError:
+                print(f"{Color.DIM}请输入数字序号{Color.RESET}")
+        elif sub == "stats":
+            self._memory_stats()
+        elif sub == "extract":
+            self._manual_extract()
+        else:
+            print(f"{Color.DIM}用法: /memory [list|add|rm|stats|extract]{Color.RESET}")
+
+    def _memory_list(self, category=None):
+        mems = self.memory.list_memories(category)
+        if not mems:
+            print(f"{Color.DIM}没有记忆{Color.RESET}")
+            return
+        print(f"{Color.DIM}─── 记忆 ({len(mems)}条) ───{Color.RESET}")
+        for i, m in enumerate(mems):
+            imp = "★" * (m.importance // 2)
+            print(f"  {Color.CYAN}{i+1}.{Color.RESET} "
+                  f"{m.content} {Color.DIM}[{m.category} {imp}]{Color.RESET}")
+
+    def _memory_stats(self):
+        stats = self.memory.get_stats()
+        print(f"{Color.DIM}─── 记忆统计 ───{Color.RESET}")
+        print(f"  总记忆:   {stats['total']}")
+        print(f"  活跃:     {Color.GREEN}{stats['active']}{Color.RESET}")
+        print(f"  已归档:   {stats['archived']}")
+        if stats['by_category']:
+            print(f"  分类:")
+            for cat, count in stats['by_category'].items():
+                print(f"    {cat}: {count}")
+
+    def _manual_extract(self):
+        if not self.ctx.history:
+            print(f"{Color.DIM}没有对话记录{Color.RESET}")
+            return
+        print(f"{Color.DIM}正在提取记忆...{Color.RESET}", end="", flush=True)
+        count = self.memory.extract_from_conversation(self.ctx.history)
+        if count > 0:
+            print(f"\r{Color.GREEN}✓ 提取了 {count} 条新记忆{Color.RESET}        ")
+        else:
+            print(f"\r{Color.YELLOW}没有发现新记忆{Color.RESET}        ")
+
+    # ─── 退出 ─────────────────────────────────
+
+    def _exit(self):
+        self.running = False
+
+        # 使用core.save()统一保存（含记忆提取+事件轨迹+体细胞检查+PSI）
+        if self.core:
+            print(f"\n{Color.DIM}正在保存...{Color.RESET}", end="", flush=True)
+            result = self.core.save()
+            parts = []
+            if result.get("session"):
+                parts.append("✓ 对话已保存")
+            if result.get("memories", 0) > 0:
+                parts.append(f"✓ 记住了 {result['memories']} 件新的事")
+            if result.get("psi"):
+                parts.append("✓ 内在状态已保存")
+            if result.get("events", 0) > 0:
+                parts.append(f"✓ 提取了 {result['events']} 个事件节点")
+            if result.get("arc_candidates", 0) > 0:
+                parts.append(f"✓ 发现 {result['arc_candidates']} 个弧光候选")
+            if parts:
+                print(f"\r{Color.GREEN}{chr(10).join(parts)}{Color.RESET}      ")
+            else:
+                print(f"\r{Color.DIM}✓ 已保存{Color.RESET}      ")
+        else:
+            # 旧模式fallback
+            if self.memory and self.ctx.history:
+                self.memory.save_session(self.ctx.history)
+                print(f"\n{Color.DIM}✓ 对话已保存{Color.RESET}")
+                mem_config = self.config.get("memory", {})
+                if mem_config.get("auto_extract", True) and len(self.ctx.history) >= 4:
+                    print(f"{Color.DIM}正在整理记忆...{Color.RESET}", end="", flush=True)
+                    count = self.memory.extract_from_conversation(self.ctx.history)
+                    if count > 0:
+                        print(f"\r{Color.GREEN}✓ 记住了 {count} 件新的事{Color.RESET}      ")
+                    else:
+                        print(f"\r{Color.DIM}✓ 没什么需要记的{Color.RESET}      ")
+            if self.psi:
+                self.psi.on_session_end()
+                print(f"{Color.DIM}✓ 内在状态已保存{Color.RESET}")
+
+        print(f"{Color.PINK}喵～下次见啦{Color.RESET}")
+        sys.exit(0)
+
+    def _forget_session(self):
+        self.ctx.clear()
+        if self.memory:
+            self.memory.session_history = []
+            session_file = self.memory.memory_dir / "session.json"
+            if session_file.exists():
+                session_file.unlink()
+        print(f"{Color.YELLOW}✦ 已清空当前会话（记忆和PSI保留）{Color.RESET}")
+
+    # ─── 其他 ─────────────────────────────────
+
+    def _print_status(self):
+        stats = self.ctx.get_stats()
+        print(f"{Color.DIM}─── 状态 ───{Color.RESET}")
+        print(f"  模型:     {Color.GREEN}{self.llm.model}{Color.RESET}")
+        print(f"  DNA版本:  {self.dna.get_dna_version()}")
+        print(f"  对话轮数: {stats['turn_count']}")
+        print(f"  消息数:   {stats['message_count']}")
+        print(f"  预估token: ~{stats['estimated_tokens']}")
+        print(f"  记忆注入: {'✓' if stats['has_memory'] else '✗'}")
+        print(f"  PSI注入:  {'✓' if stats['has_psi'] else '✗'}")
+        if self.memory:
+            mem_stats = self.memory.get_stats()
+            print(f"  记忆:     {mem_stats['active']}活跃/{mem_stats['total']}总计")
+        if self.psi:
+            psi_stats = self.psi.get_stats()
+            print(f"  意识帧:   {psi_stats['consciousness_frame']}")
+
+    def _save_conversation(self):
+        if not self.ctx.history:
+            print(f"{Color.DIM}没有对话记录{Color.RESET}")
+            return
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"chat_{timestamp}.json"
+        data = {
+            "timestamp": timestamp,
+            "model": self.llm.model,
+            "dna_version": self.dna.get_dna_version(),
+            "messages": self.ctx.history,
+        }
+        with open(filename, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        print(f"{Color.GREEN}✓ 对话已保存到 {filename}{Color.RESET}")
+
+    def _print_entities(self):
+        """显示实体图"""
+        if not self.entity_graph:
+            print(f"{Color.DIM}实体图未启用{Color.RESET}")
+            return
+        stats = self.entity_graph.get_stats()
+        print(f"{Color.DIM}─── 实体图 ───{Color.RESET}")
+        print(f"  {Color.YELLOW}实体总数: {stats['total_entities']}{Color.RESET}")
+        print(f"  {Color.YELLOW}关联边数: {stats['total_edges']}{Color.RESET}")
+        print(f"  {Color.YELLOW}平均边权: {stats['avg_edge_weight']}{Color.RESET}")
+        print()
+        by_type = stats.get("by_type", {})
+        for t, count in sorted(by_type.items(), key=lambda x: -x[1]):
+            print(f"  {Color.CYAN}{t}: {count}{Color.RESET}")
+        print()
+        # 列出实体
+        entities = list(self.entity_graph.entities.values())
+        for e in entities[:20]:
+            aliases = f" (别名: {', '.join(e.aliases)})" if e.aliases else ""
+            linked = f" → {len(e.linked_memories)}条记忆" if e.linked_memories else ""
+            print(f"  {Color.GREEN}[{e.entity_type}]{Color.RESET} {e.canonical_name}{aliases}{Color.DIM}{linked}{Color.RESET}")
+        if len(entities) > 20:
+            print(f"  {Color.DIM}...还有 {len(entities) - 20} 个{Color.RESET}")
+
+    def _print_events(self):
+        """显示事件轨迹（P0.18）"""
+        stats = self.core.event_stats() if hasattr(self, 'core') and self.core else {}
+        if not stats:
+            print(f"{Color.DIM}事件轨迹系统未启用{Color.RESET}")
+            return
+        print(f"{Color.DIM}─── 事件轨迹 (P0.18) ───{Color.RESET}")
+        print(f"  {Color.YELLOW}事件总数: {stats.get('total_events', 0)}{Color.RESET}")
+        print(f"  {Color.YELLOW}分叉口: {stats.get('branch_points', 0)}{Color.RESET}")
+        print(f"  {Color.YELLOW}事件簇: {stats.get('clusters', 0)}{Color.RESET}")
+        print(f"  {Color.YELLOW}高置信度: {stats.get('high_confidence', 0)}{Color.RESET}")
+        avg = stats.get('avg_confidence', 0)
+        print(f"  {Color.YELLOW}平均置信度: {avg:.2f}{Color.RESET}")
+
+    def _print_cells(self):
+        """显示体细胞（P0.17）"""
+        stats = self.core.somatic_stats() if hasattr(self, 'core') and self.core else {}
+        if not stats:
+            print(f"{Color.DIM}体细胞系统未启用{Color.RESET}")
+            return
+        print(f"{Color.DIM}─── 体细胞 (P0.17) ───{Color.RESET}")
+        print(f"  {Color.GREEN}活跃: {stats.get('active', 0)}{Color.RESET}")
+        print(f"  {Color.YELLOW}候选: {stats.get('candidate', 0)}{Color.RESET}")
+        print(f"  {Color.DIM}休眠: {stats.get('dormant', 0)}{Color.RESET}")
+        print(f"  {Color.DIM}覆盖: {stats.get('covered', 0)}{Color.RESET}")
+        print(f"  {Color.DIM}丢弃: {stats.get('discarded', 0)}{Color.RESET}")
+        print(f"  {Color.DIM}淡化: {stats.get('faded', 0)}{Color.RESET}")
+
+    def _print_feedback(self):
+        """显示活体约束层（P0.16）"""
+        stats = self.core.feedback_stats() if hasattr(self, 'core') and self.core else {}
+        if not stats:
+            print(f"{Color.DIM}活体约束层未启用{Color.RESET}")
+            return
+        print(f"{Color.DIM}─── 活体约束层 (P0.16) ───{Color.RESET}")
+        weights = stats.get('weights', {})
+        changes = stats.get('weight_changes', {})
+        for key, value in weights.items():
+            change = changes.get(key, 0)
+            if change > 0:
+                arrow = f" {Color.GREEN}↑{change:+.2f}{Color.RESET}"
+            elif change < 0:
+                arrow = f" {Color.RED}↓{change:+.2f}{Color.RESET}"
+            else:
+                arrow = ""
+            print(f"  {Color.CYAN}{key}: {value:.2f}{arrow}{Color.RESET}")
+        print(f"  {Color.DIM}总调整次数: {stats.get('total_adjustments', 0)}{Color.RESET}")
+
+    def _test_connection(self, silent: bool = False):
+        if not silent:
+            print(f"{Color.DIM}测试API连接...{Color.RESET}", end="", flush=True)
+        ok, msg = self.llm.test_connection()
+        if ok:
+            if not silent:
+                print(f"\r{Color.GREEN}✓ {msg}{Color.RESET}          ")
+        else:
+            print(f"\r{Color.RED}✗ {msg}{Color.RESET}          ")
+
+    def _handle_observe(self, parts: list):
+        """P0.9: 观察者调试面板"""
+        observer = self.core.observer if self.core else None
+        if not observer:
+            print(f"{Color.DIM}观察者未启用{Color.RESET}")
+            return
+
+        sub = parts[1] if len(parts) > 1 else ""
+        arg = parts[2] if len(parts) > 2 else ""
+
+        if sub == "" or sub == "last":
+            # 显示最近5帧摘要
+            count = int(arg) if arg.isdigit() else 5
+            frames = observer.get_recent_frames(count)
+            if not frames:
+                print(f"{Color.DIM}还没有运行帧记录{Color.RESET}")
+                return
+            print(f"{Color.CYAN}─── 最近 {len(frames)} 帧摘要 ───{Color.RESET}")
+            for f in frames:
+                print(f"  {observer.format_summary(f)}")
+            stats = observer.get_stats()
+            print(f"{Color.DIM}  共 {stats['total_frames']} 帧{Color.RESET}")
+
+        elif sub == "frame" and arg:
+            # 显示某帧详情
+            frame_id = int(arg) if arg.isdigit() else 0
+            frame = observer.get_frame(frame_id)
+            if not frame:
+                print(f"{Color.DIM}帧 #{frame_id} 不存在{Color.RESET}")
+                return
+            print(observer.format_detail(frame))
+
+        elif sub == "diff":
+            # 对比两帧
+            ids = arg.split() if arg else []
+            if len(ids) < 2:
+                print(f"{Color.DIM}用法: /obs diff <id1> <id2>{Color.RESET}")
+                return
+            a = observer.get_frame(int(ids[0]))
+            b = observer.get_frame(int(ids[1]))
+            if not a:
+                print(f"{Color.DIM}帧 #{ids[0]} 不存在{Color.RESET}")
+                return
+            if not b:
+                print(f"{Color.DIM}帧 #{ids[1]} 不存在{Color.RESET}")
+                return
+            print(observer.format_diff(a, b))
+
+        elif sub == "stats":
+            stats = observer.get_stats()
+            print(f"{Color.CYAN}─── 观察者统计 ───{Color.RESET}")
+            print(f"  总帧数: {stats['total_frames']}")
+            print(f"  存储目录: {stats['frames_dir']}")
+
+        elif sub == "clear":
+            count = observer.clear()
+            print(f"{Color.YELLOW}✦ 已清除 {count} 个运行帧{Color.RESET}")
+
+        else:
+            print(f"{Color.DIM}用法:{Color.RESET}")
+            print(f"  {Color.CYAN}/obs{Color.RESET}              最近5帧摘要")
+            print(f"  {Color.CYAN}/obs last <N>{Color.RESET}     最近N帧摘要")
+            print(f"  {Color.CYAN}/obs frame <id>{Color.RESET}   某帧完整详情")
+            print(f"  {Color.CYAN}/obs diff <id1> <id2>{Color.RESET} 对比两帧")
+            print(f"  {Color.CYAN}/obs stats{Color.RESET}        统计信息")
+            print(f"  {Color.CYAN}/obs clear{Color.RESET}        清除所有帧")
+
+    # ─── P0.5: 快照命令 ──────────────────────
+
+    def _handle_snapshot(self, parts: list):
+        if not self.core or not self.core.snapshot:
+            print(f"{Color.DIM}快照系统未启用{Color.RESET}")
+            return
+
+        sub = parts[1] if len(parts) > 1 else "list"
+
+        if sub == "list" or sub == "ls":
+            snapshots = self.core.snapshot_list()
+            if not snapshots:
+                print(f"{Color.DIM}还没有快照{Color.RESET}")
+                return
+            print(f"{Color.DIM}─── 快照列表 ({len(snapshots)}个) ───{Color.RESET}")
+            for i, snap in enumerate(snapshots):
+                ts = snap.get("timestamp", "")[:19]
+                reason = snap.get("reason", "")
+                files = snap.get("files", 0)
+                sc = snap.get("somatic_count", 0)
+                print(f"  {Color.CYAN}{i+1}.{Color.RESET} "
+                      f"{Color.BOLD}{snap['id']}{Color.RESET} "
+                      f"{Color.DIM}{ts}{Color.RESET}")
+                print(f"     {Color.DIM}原因: {reason} | 文件: {files} | "
+                      f"体细胞: {sc}{Color.RESET}")
+
+        elif sub == "create":
+            reason = parts[2] if len(parts) > 2 else "manual"
+            print(f"{Color.DIM}正在创建快照...{Color.RESET}", end="", flush=True)
+            snap_id = self.core.snapshot_create(reason)
+            if snap_id:
+                print(f"\r{Color.GREEN}✓ 快照已创建: {snap_id}{Color.RESET}        ")
+            else:
+                print(f"\r{Color.RED}✗ 创建失败{Color.RESET}        ")
+
+        elif sub == "rollback":
+            if len(parts) < 3:
+                print(f"{Color.DIM}用法: /snap rollback <快照ID或序号>{Color.RESET}")
+                return
+            target = parts[2]
+            # 支持序号选择
+            snapshots = self.core.snapshot_list()
+            if target.isdigit():
+                idx = int(target) - 1
+                if 0 <= idx < len(snapshots):
+                    target = snapshots[idx]["id"]
+                else:
+                    print(f"{Color.RED}✗ 序号无效{Color.RESET}")
+                    return
+            print(f"{Color.DIM}正在回退到 {target}...{Color.RESET}", end="", flush=True)
+            ok, msg = self.core.snapshot_rollback(target)
+            if ok:
+                print(f"\r{Color.GREEN}✓ {msg}{Color.RESET}        ")
+            else:
+                print(f"\r{Color.RED}✗ {msg}{Color.RESET}        ")
+
+        elif sub == "verify":
+            print(f"{Color.DIM}正在检查完整性...{Color.RESET}")
+            result = self.core.snapshot_verify()
+            print(f"{Color.DIM}─── 完整性检查 ───{Color.RESET}")
+            for check in result.get("checks", []):
+                name = check["name"]
+                passed = check["passed"]
+                detail = check["detail"]
+                icon = f"{Color.GREEN}✅" if passed else f"{Color.RED}❌"
+                print(f"  {icon} {name}{Color.RESET}: {detail}")
+            overall = result.get("passed", False)
+            if overall:
+                print(f"\n  {Color.GREEN}✓ 全部通过{Color.RESET}")
+            else:
+                print(f"\n  {Color.RED}⚠ 存在问题，建议回退{Color.RESET}")
+
+        elif sub == "log":
+            limit = 10
+            if len(parts) > 2:
+                try:
+                    limit = int(parts[2])
+                except ValueError:
+                    pass
+            log = self.core.snapshot_log(limit)
+            if not log:
+                print(f"{Color.DIM}还没有进化日志{Color.RESET}")
+                return
+            print(f"{Color.DIM}─── 进化日志 (最近{len(log)}条) ───{Color.RESET}")
+            for entry in log:
+                ts = entry.get("timestamp", "")[:19]
+                etype = entry.get("type", "")
+                if etype == "snapshot":
+                    icon = "📸"
+                    detail = f"原因: {entry.get('reason', '')}"
+                elif etype == "rollback":
+                    icon = "↩️"
+                    detail = f"恢复: {entry.get('files_restored', 0)}个文件"
+                else:
+                    icon = "•"
+                    detail = str(entry)
+                print(f"  {icon} {Color.DIM}{ts}{Color.RESET} {detail}")
+
+        elif sub == "stats":
+            stats = self.core.snapshot_stats()
+            print(f"{Color.DIM}─── 快照统计 ───{Color.RESET}")
+            print(f"  总快照:     {stats.get('total_snapshots', 0)}")
+            print(f"  日志条目:   {stats.get('total_log_entries', 0)}")
+            print(f"  今日回退:   {stats.get('today_rollbacks', 0)}")
+            budget = stats.get('rollback_budget', 0)
+            bcolor = Color.GREEN if budget > 0 else Color.RED
+            print(f"  回退预算:   {bcolor}{budget}{Color.RESET}/{stats.get('today_rollbacks', 0)+budget}")
+            print(f"  体细胞上限: {stats.get('max_somatic', 50)}")
+            print(f"  弧光上限:   {stats.get('max_arc', 20)}")
+
+        else:
+            print(f"{Color.DIM}用法:{Color.RESET}")
+            print(f"  {Color.CYAN}/snap{Color.RESET}                 查看快照列表")
+            print(f"  {Color.CYAN}/snap create <原因>{Color.RESET}    创建快照")
+            print(f"  {Color.CYAN}/snap rollback <ID>{Color.RESET}   回退到快照")
+            print(f"  {Color.CYAN}/snap verify{Color.RESET}          完整性检查")
+            print(f"  {Color.CYAN}/snap log <N>{Color.RESET}         进化日志")
+            print(f"  {Color.CYAN}/snap stats{Color.RESET}           统计信息")
+
+    # ─── 守护进程命令（P0.11）─────────────────
+
+    def _handle_daemon(self, parts: list):
+        """守护进程命令"""
+        if not self.core or not self.core.daemon:
+            print(f"{Color.DIM}守护进程未启用{Color.RESET}")
+            return
+
+        sub = parts[1] if len(parts) > 1 else ""
+
+        if sub == "run":
+            print(f"{Color.DIM}手动执行守护进程...{Color.RESET}")
+            result = self.core.daemon_run_once()
+            self._print_daemon_result(result)
+        elif sub == "vitals":
+            vitals = self.core.daemon_vitals()
+            if not vitals:
+                print(f"{Color.DIM}暂无生命体征数据{Color.RESET}")
+                return
+            print(f"{Color.DIM}─── 生命体征 (vitals) ───{Color.RESET}")
+            print(f"  时间: {vitals.get('timestamp', '?')[:19]}")
+            print(f"  轮次: 第{vitals.get('cycle_count', 0)}轮")
+            psi = vitals.get("psi", {})
+            if psi:
+                print(f"  {Color.PINK}PSI状态:{Color.RESET}")
+                for nid, val in psi.items():
+                    level = val.get("level", 0)
+                    bar = "■" * int(round(level)) + "□" * (5 - int(round(level)))
+                    print(f"    {nid}: {bar} {val.get('status', '?')} {val.get('trend', '')}")
+            mem = vitals.get("memory", {})
+            if mem:
+                print(f"  记忆: {mem.get('active', 0)}活跃/{mem.get('total', 0)}总计")
+            hex_data = vitals.get("hexagram", {})
+            if hex_data:
+                print(f"  卦象: {hex_data.get('hexagram', '?')} (更新{hex_data.get('update_count', 0)}次)")
+            growth = vitals.get("growth", {})
+            if growth:
+                print(f"  体细胞: {growth.get('total', 0)}个")
+            last_int = vitals.get("last_interaction", "")
+            if last_int:
+                print(f"  上次互动: {last_int[:19]}")
+        else:
+            status = self.core.daemon_status()
+            print(f"{Color.DIM}─── 守护进程 ───{Color.RESET}")
+            print(f"  启用: {'是' if status.get('enabled') else '否'}")
+            print(f"  运行中: {'是' if status.get('running') else '否'}")
+            print(f"  间隔: {status.get('interval', 1800)}秒")
+            print(f"  轮次: 第{status.get('cycle_count', 0)}轮")
+            if status.get("last_run"):
+                print(f"  上次执行: {status['last_run']}")
+            summary = status.get("last_summary")
+            if summary and summary.get("errors"):
+                print(f"  {Color.RED}⚠ 上轮有{len(summary['errors'])}个错误{Color.RESET}")
+
+    def _print_daemon_result(self, result: dict):
+        """打印守护进程执行结果"""
+        print(f"{Color.DIM}─── 守护进程执行结果 ───{Color.RESET}")
+        print(f"  轮次: 第{result.get('cycle', 0)}轮")
+        print(f"  时间: {result.get('timestamp', '?')}")
+        r = result.get("results", {})
+        # PSI压力
+        psi_r = r.get("psi_pressure", {})
+        if psi_r and "pressures" in psi_r:
+            print(f"  {Color.PINK}PSI压力:{Color.RESET}")
+            for nid, val in psi_r["pressures"].items():
+                print(f"    {nid}: {val}")
+            if psi_r.get("alerts"):
+                for a in psi_r["alerts"]:
+                    print(f"    {Color.YELLOW}⚠ {a}{Color.RESET}")
+        # 时间感知
+        time_r = r.get("time_awareness", {})
+        if time_r and "time" in time_r:
+            print(f"  时间: {time_r.get('time', '?')} {time_r.get('shichen', '')} ({time_r.get('period', '')})")
+        # 记忆衰减
+        decay_r = r.get("memory_decay", {})
+        if decay_r and "total" in decay_r:
+            print(f"  记忆: {decay_r.get('total', 0)}条，更新{decay_r.get('updated', 0)}条")
+        # 过期记忆
+        stale_r = r.get("stale_memories", {})
+        if stale_r and "total" in stale_r:
+            print(f"  过期: {stale_r.get('stale_unimportant', 0)}可淡化，{stale_r.get('stale_important', 0)}需巩固")
+        # vitals
+        vitals_r = r.get("vitals", {})
+        if vitals_r and vitals_r.get("written"):
+            print(f"  {Color.GREEN}✓ vitals.json已更新{Color.RESET}")
+        errors = result.get("errors")
+        if errors:
+            print(f"  {Color.RED}⚠ 错误: {errors}{Color.RESET}")
+        else:
+            print(f"  {Color.GREEN}✓ 全部任务正常{Color.RESET}")
+        # Layer 2: 反思结果
+        ref_r = r.get("reflection", {})
+        if ref_r and ref_r.get("success"):
+            print(f"  {Color.PINK}🧠 每日反思: {ref_r.get('insight', '')[:50]}{Color.RESET}")
+        elif ref_r and ref_r.get("error"):
+            print(f"  {Color.RED}⚠ 反思失败: {ref_r['error'][:50]}{Color.RESET}")
+        # Layer 3: PSI触发思考
+        psi_r = r.get("psi_thinking", {})
+        if psi_r and psi_r.get("count"):
+            for trig in psi_r.get("triggers", []):
+                print(f"  {Color.YELLOW}⚡ PSI触发: {trig.get('trigger', '?')} "
+                      f"({trig.get('description', '')}){Color.RESET}")
+                if trig.get("thought"):
+                    print(f"    → {trig['thought'][:60]}")
+
+    # ─── P0.11 Layer 2/3: 反思命令 ────────────
+
+    def _handle_reflect(self, parts: list):
+        """处理 /reflect 命令"""
+        sub = parts[1] if len(parts) > 1 else ""
+
+        if sub == "run":
+            print(f"{Color.DIM}手动触发每日反思...{Color.RESET}")
+            result = self.core.reflection_run()
+            self._print_reflection_result(result)
+
+        elif sub == "diary":
+            entries = self.core.reflection_diary(limit=10)
+            if not entries:
+                print(f"{Color.DIM}暂无知觉日记{Color.RESET}")
+                return
+            print(f"{Color.DIM}─── 知觉日记 ───{Color.RESET}")
+            for e in entries:
+                ts = e.get("timestamp", "?")[:19]
+                etype = e.get("type", "?")
+                if etype == "daily_reflection":
+                    print(f"  {Color.PINK}[{ts}] 每日感悟{Color.RESET}")
+                    print(f"    {e.get('insight', '')}")
+                    if e.get("hexagram"):
+                        print(f"    {Color.DIM}卦象: {e['hexagram']}{Color.RESET}")
+                elif etype == "psi_triggered":
+                    print(f"  {Color.YELLOW}[{ts}] PSI触发 ({e.get('trigger', '?')}){Color.RESET}")
+                    print(f"    {e.get('thought', '')}")
+
+        elif sub == "want":
+            queue = self.core.reflection_want_to_say()
+            if not queue:
+                print(f"{Color.DIM}没有想说的话{Color.RESET}")
+                return
+            print(f"{Color.DIM}─── 想说的话 ───{Color.RESET}")
+            for i, q in enumerate(queue):
+                ts = q.get("timestamp", "?")[:19]
+                src = q.get("source", "?")
+                print(f"  {Color.PINK}[{i}] {ts} ({src}){Color.RESET}")
+                print(f"    {q.get('message', '')}")
+
+        elif sub == "trigger":
+            print(f"{Color.DIM}手动检查PSI压力...{Color.RESET}")
+            result = self.core.psi_thinking_check()
+            if not result:
+                print(f"{Color.GREEN}当前PSI压力正常，无需触发思考{Color.RESET}")
+            else:
+                print(f"{Color.DIM}─── PSI触发思考 ───{Color.RESET}")
+                for trig in result.get("triggers", []):
+                    print(f"  {Color.YELLOW}触发: {trig.get('trigger', '?')}{Color.RESET}")
+                    print(f"    描述: {trig.get('description', '')}")
+                    print(f"    PSI值: {trig.get('psi_level', '?')}")
+                    if trig.get("thought"):
+                        print(f"    思考: {trig['thought']}")
+                    if trig.get("want_to_say"):
+                        print(f"    {Color.PINK}想说: {trig['want_to_say']}{Color.RESET}")
+                    if trig.get("error"):
+                        print(f"    {Color.RED}错误: {trig['error']}{Color.RESET}")
+
+        else:
+            # 默认：显示状态
+            ref_status = self.core.reflection_status()
+            psi_status = self.core.psi_thinking_status()
+            print(f"{Color.DIM}─── 长在线思考系统 ───{Color.RESET}")
+
+            # Layer 2 状态
+            print(f"  {Color.PINK}Layer 2 每日反思:{Color.RESET}")
+            print(f"    启用: {'是' if ref_status.get('enabled') else '否'}")
+            print(f"    计划时间: {ref_status.get('schedule_hours', [])}点")
+            print(f"    今日已运行: {ref_status.get('today_runs', 0)}/"
+                  f"{ref_status.get('max_daily_runs', 2)}次")
+            print(f"    总计: {ref_status.get('run_count', 0)}次")
+            if ref_status.get("last_run"):
+                print(f"    上次: {ref_status['last_run'][:19]}")
+            last = ref_status.get("last_summary", {})
+            if last and last.get("success"):
+                print(f"    {Color.GREEN}上次感悟: {last.get('insight', '')[:40]}{Color.RESET}")
+
+            # Layer 3 状态
+            print(f"  {Color.YELLOW}Layer 3 PSI触发思考:{Color.RESET}")
+            print(f"    启用: {'是' if psi_status.get('enabled') else '否'}")
+            print(f"    冷却: {psi_status.get('cooldown_hours', 2)}小时")
+            print(f"    总触发: {psi_status.get('trigger_count', 0)}次")
+            last_trigs = psi_status.get("last_triggers", {})
+            if last_trigs:
+                for tname, ts in last_trigs.items():
+                    print(f"    {tname}: {ts[:19]}")
+            else:
+                print(f"    {Color.DIM}尚未触发过{Color.RESET}")
+
+    def _print_reflection_result(self, result: dict):
+        """打印反思结果"""
+        if result.get("error"):
+            print(f"  {Color.RED}✗ 反思失败: {result['error']}{Color.RESET}")
+            return
+        print(f"{Color.DIM}─── 反思结果 ───{Color.RESET}")
+        print(f"  第{result.get('run_count', 0)}次 | {result.get('timestamp', '?')[:19]}")
+        if result.get("insight"):
+            print(f"  {Color.PINK}感悟: {result['insight']}{Color.RESET}")
+        if result.get("consolidated"):
+            print(f"  {Color.GREEN}巩固记忆: {result['consolidated']}条{Color.RESET}")
+        if result.get("want_to_say"):
+            print(f"  {Color.PINK}想说: {result['want_to_say']}{Color.RESET}")
+        print(f"  {Color.GREEN}✓ 反思完成{Color.RESET}")
+
+    # ─── P0.23: 认知路由 ──────────────────────
+
+    def _handle_route(self, parts: list):
+        """处理 /route 命令 — 查看认知路由统计"""
+        router = getattr(self.core, 'cognitive_router', None)
+        if not router:
+            print(f"{Color.DIM}认知路由层未启用{Color.RESET}")
+            return
+
+        sub = parts[1] if len(parts) > 1 else ""
+
+        if sub == "stats":
+            stats = router.get_stats()
+            print(f"{Color.DIM}─── 路由统计 ───{Color.RESET}")
+            print(f"  总请求: {stats['total']}")
+            print(f"  {Color.GREEN}⚡规则命中: {stats['rule_hit']}{Color.RESET} ({stats.get('rule_hit_rate', '0%')})")
+            print(f"  {Color.CYAN}📦记忆复用: {stats['memory_hit']}{Color.RESET} ({stats.get('memory_hit_rate', '0%')})")
+            print(f"  {Color.YELLOW}📋模板填充: {stats['template_hit']}{Color.RESET} ({stats.get('template_hit_rate', '0%')})")
+            print(f"  {Color.DIM}🤖LLM兜底: {stats['llm_fallback']}{Color.RESET} ({stats.get('llm_fallback_rate', '0%')})")
+            print(f"  情景库: {stats.get('episodic_store_size', 0)}条")
+            print(f"  {Color.GREEN}预估节省: ~{stats.get('token_saved_est', 0)} token{Color.RESET}")
+        elif sub == "off":
+            router.enabled = False
+            print(f"{Color.YELLOW}认知路由已关闭（所有消息走LLM）{Color.RESET}")
+        elif sub == "on":
+            router.enabled = True
+            print(f"{Color.GREEN}认知路由已开启{Color.RESET}")
+        else:
+            # 默认显示概览
+            stats = router.get_stats()
+            print(f"{Color.DIM}─── 认知路由层 ───{Color.RESET}")
+            print(f"  状态: {'✅启用' if router.enabled else '❌关闭'}")
+            print(f"  Layer 1 规则匹配: {'✅' if router.layers.get('rule') else '❌'}")
+            print(f"  Layer 2 情景复用: {'✅' if router.layers.get('episodic') else '❌'}")
+            print(f"  Layer 3 模板填充: {'✅' if router.layers.get('template') else '❌'}")
+            if stats["total"] > 0:
+                print(f"  总请求: {stats['total']}")
+                print(f"  ⚡规则: {stats['rule_hit']} | 📦记忆: {stats['memory_hit']} | 📋模板: {stats['template_hit']} | 🤖LLM: {stats['llm_fallback']}")
+                print(f"  预估节省: ~{stats.get('token_saved_est', 0)} token")
+            print(f"  {Color.DIM}/route stats 详细 | /route on|off 开关{Color.RESET}")
+
+    # ─── 插件命令 (P0.4) ──────────────────────
+
+    def _handle_plugin(self, parts):
+        pm = self.core.plugin_manager if self.core else None
+        if not pm:
+            print(f"{Color.DIM}插件系统未启用{Color.RESET}")
+            return
+
+        sub = parts[1] if len(parts) > 1 else ""
+
+        if sub == "" or sub == "list":
+            stats = pm.get_stats()
+            print(f"{Color.DIM}─── 插件 ───{Color.RESET}")
+            print(f"  总计: {stats['total']} | 启用: {stats['enabled']} | 禁用: {stats['disabled']}")
+            if stats["plugins"]:
+                for p in stats["plugins"]:
+                    status = f"{Color.GREEN}✅" if p["enabled"] else f"{Color.RED}❌"
+                    health = "" if p["healthy"] else f" {Color.YELLOW}⚠不健康{Color.RESET}"
+                    desc = f" — {p['description']}" if p["description"] else ""
+                    print(f"  {status}{Color.RESET} {p['name']} v{p['version']} [{p['type']}]{health}{Color.DIM}{desc}{Color.RESET}")
+            else:
+                print(f"  {Color.DIM}暂无已加载插件{Color.RESET}")
+            print(f"  {Color.DIM}/plugin on|off <name> 开关插件{Color.RESET}")
+
+        elif sub == "on" and len(parts) > 2:
+            name = parts[2]
+            if pm.enable(name):
+                print(f"{Color.GREEN}✅ 插件 {name} 已启用{Color.RESET}")
+            else:
+                print(f"{Color.RED}❌ 找不到插件: {name}{Color.RESET}")
+
+        elif sub == "off" and len(parts) > 2:
+            name = parts[2]
+            if pm.disable(name):
+                print(f"{Color.YELLOW}✅ 插件 {name} 已禁用{Color.RESET}")
+            else:
+                print(f"{Color.RED}❌ 找不到插件: {name}{Color.RESET}")
+
+        else:
+            print(f"  {Color.DIM}/plugin list | /plugin on <name> | /plugin off <name>{Color.RESET}")
+
+    # ─── 自研路线图命令 (P0.4) ────────────────
+
+    def _handle_roadmap(self, parts):
+        rm = self.core.self_roadmap if self.core else None
+        if not rm:
+            print(f"{Color.DIM}自研路线图未启用{Color.RESET}")
+            return
+
+        sub = parts[1] if len(parts) > 1 else ""
+
+        if sub == "" or sub == "overview":
+            ov = rm.get_overview()
+            print(f"{Color.DIM}─── 自研路线图 ───{Color.RESET}")
+            s = ov["stats"]
+            print(f"  总计: {s['total_ideas']} | 完成: {s['completed']} | 失败: {s['failed']} | 放弃: {s['abandoned']}")
+            print(f"  进行中: {ov['in_progress_count']} | 经验: {ov['lessons_count']}条")
+            print(f"  本月自主发现: {ov['self_discovered_this_month']}/{ov['self_discovered_limit']}")
+            if ov["in_progress"]:
+                print(f"\n  {Color.CYAN}进行中:{Color.RESET}")
+                for item in ov["in_progress"]:
+                    priority_mark = "🔴" if item["priority"] == "high" else "⚪"
+                    source_mark = "👑" if item["source"] == "master_request" else "🌱"
+                    print(f"    {priority_mark}{source_mark} {item['id']} [{item['status']}] {item['title']}")
+            else:
+                print(f"  {Color.DIM}暂无进行中的idea{Color.RESET}")
+            print(f"\n  {Color.DIM}/roadmap list 列表 | /roadmap add <描述> 添加 | /roadmap <id> 详情{Color.RESET}")
+
+        elif sub == "list":
+            ideas = rm.list_ideas()
+            if not ideas:
+                print(f"{Color.DIM}路线图为空{Color.RESET}")
+                return
+            print(f"{Color.DIM}─── 所有idea ({len(ideas)}) ───{Color.RESET}")
+            for idea in ideas:
+                status_color = {
+                    "done": Color.GREEN, "failed": Color.RED, "abandoned": Color.DIM,
+                    "idea": Color.YELLOW, "designing": Color.CYAN, "coding": Color.CYAN, "testing": Color.CYAN,
+                }.get(idea["status"], Color.RESET)
+                priority_mark = "🔴" if idea["priority"] == "high" else "  "
+                source_mark = "👑" if idea["source"] == "master_request" else "🌱"
+                print(f"  {priority_mark}{source_mark} {idea['id']} {status_color}[{idea['status']}]{Color.RESET} {idea['title']}")
+
+        elif sub == "add" and len(parts) > 2:
+            # 合并剩余部分作为描述
+            desc = " ".join(parts[2:])
+            idea, err = rm.add_idea(
+                title=desc[:50],
+                description=desc,
+                source="master_request",
+                source_detail=f"CLI添加: {desc}",
+            )
+            if err:
+                print(f"{Color.RED}❌ {err}{Color.RESET}")
+            else:
+                print(f"{Color.GREEN}✅ 已添加 idea: {idea['id']} — {idea['title']}{Color.RESET}")
+                print(f"  {Color.DIM}来源: 主人指定 | 优先级: high | 状态: idea{Color.RESET}")
+
+        elif sub and sub.startswith("idea_"):
+            detail = rm.get_idea_detail(sub)
+            if not detail:
+                print(f"{Color.RED}❌ 找不到: {sub}{Color.RESET}")
+                return
+            print(f"{Color.DIM}─── {detail['id']} ───{Color.RESET}")
+            print(f"  标题: {detail['title']}")
+            print(f"  状态: {detail['status']} | 优先级: {detail['priority']} | 来源: {detail['source']}")
+            print(f"  创建: {detail['created_at'][:19]}")
+            print(f"  描述: {detail['description']}")
+            if detail.get("design"):
+                print(f"  设计: {detail['design'][:200]}...")
+            if detail.get("attempts"):
+                print(f"  尝试: {len(detail['attempts'])}次")
+            if detail.get("lessons"):
+                print(f"  经验:")
+                for l in detail["lessons"]:
+                    print(f"    - {l['what_happened']}")
+            if detail.get("tags"):
+                print(f"  标签: {', '.join(detail['tags'])}")
+
+        else:
+            print(f"  {Color.DIM}/roadmap overview | /roadmap list | /roadmap add <描述> | /roadmap <id>{Color.RESET}")
+
+    def _handle_compile(self, parts):
+        """处理 /compile 命令 — 记忆编译层"""
+        sub = parts[1] if len(parts) > 1 else "stats"
+
+        if sub == "stats":
+            status = self.core.compile_status()
+            if not status.get("enabled", True) and "enabled" in status:
+                print(f"{Color.DIM}记忆编译层未启用{Color.RESET}")
+                return
+            print(f"{Color.DIM}─── 记忆编译层 ───{Color.RESET}")
+            print(f"  总页数: {status.get('total_pages', 0)}")
+            by_type = status.get("by_type", {})
+            for ptype, count in by_type.items():
+                type_names = {"source": "来源页", "entity": "实体页",
+                              "concept": "概念页", "comparison": "对比页"}
+                print(f"    {type_names.get(ptype, ptype)}: {count}")
+            print(f"  编译次数: {status.get('compile_count', 0)}")
+            if status.get("last_compile_time"):
+                print(f"  上次编译: {status['last_compile_time'][:19]}")
+            if status.get("last_lint_time"):
+                print(f"  上次Lint: {status['last_lint_time'][:19]}")
+
+        elif sub == "run":
+            print(f"{Color.YELLOW}⏳ 正在编译记忆...{Color.RESET}")
+            result = self.core.compile_run(force=True)
+            if result.get("error"):
+                print(f"{Color.RED}❌ {result['error']}{Color.RESET}")
+            elif result.get("compiled", 0) == 0:
+                print(f"{Color.DIM}未编译新页（{result.get('reason', '无新记忆')}）{Color.RESET}")
+            else:
+                print(f"{Color.GREEN}✅ 编译完成！{Color.RESET}")
+                print(f"  新建页数: {result['compiled']}")
+                print(f"  处理记忆: {result.get('new_memories', 0)}")
+                print(f"  总页数: {result.get('total_pages', 0)}")
+                for p in result.get("pages_created", []):
+                    type_names = {"source": "来源", "entity": "实体",
+                                  "concept": "概念", "comparison": "对比"}
+                    print(f"    [{type_names.get(p['type'], p['type'])}] {p['title']}")
+
+        elif sub == "lint":
+            print(f"{Color.YELLOW}⏳ 正在执行健康检查...{Color.RESET}")
+            result = self.core.lint_run()
+            if result.get("error"):
+                print(f"{Color.RED}❌ {result['error']}{Color.RESET}")
+            else:
+                print(f"{Color.DIM}─── Lint报告 ───{Color.RESET}")
+                print(f"  总记忆: {result.get('total_memories', 0)}")
+                print(f"  总页数: {result.get('total_pages', 0)}")
+                print(f"  孤立记忆: {len(result.get('orphan_memories', []))}")
+                print(f"  缺失链接: {len(result.get('missing_links', []))}")
+                print(f"  矛盾冲突: {len(result.get('contradictions', []))}")
+                print(f"  关联建议: {len(result.get('suggestions', []))}")
+                if result.get("orphan_memories"):
+                    print(f"\n  {Color.YELLOW}孤立记忆（无实体关联）:{Color.RESET}")
+                    for m in result["orphan_memories"][:5]:
+                        print(f"    [{m['importance']}] {m['content']}")
+                if result.get("suggestions"):
+                    print(f"\n  {Color.CYAN}关联建议:{Color.RESET}")
+                    for s in result["suggestions"][:5]:
+                        print(f"    [{s['tag']}] {s['page_a']} ↔ {s['page_b']}")
+
+        else:
+            print(f"  {Color.DIM}/compile stats | /compile run | /compile lint{Color.RESET}")
+
+    def _handle_topic(self, parts):
+        """处理 /topic 命令 — 主动话题系统"""
+        sub = parts[1] if len(parts) > 1 else "stats"
+
+        if sub == "stats":
+            status = self.core.topic_status()
+            if not status.get("enabled", True) and "enabled" in status:
+                print(f"{Color.DIM}话题系统未启用{Color.RESET}")
+                return
+            print(f"{Color.DIM}─── 主动话题 ───{Color.RESET}")
+            print(f"  可用话题: {status.get('unused', 0)}")
+            print(f"  已用话题: {status.get('used', 0)}")
+            print(f"  总计: {status.get('total', 0)}")
+            by_cat = status.get("by_category", {})
+            if by_cat:
+                cat_names = {"anime": "动漫", "game": "游戏", "tech": "科技",
+                             "history": "历史", "fun": "趣味", "daily": "日常",
+                             "emotion": "情感"}
+                print(f"  分类:")
+                for cat, count in by_cat.items():
+                    print(f"    {cat_names.get(cat, cat)}: {count}")
+            if status.get("needs_generate"):
+                print(f"  {Color.YELLOW}⚠ 队列不足，需要生成{Color.RESET}")
+
+        elif sub in ("gen", "generate"):
+            print(f"{Color.YELLOW}⏳ 正在生成话题...{Color.RESET}")
+            result = self.core.topic_generate()
+            if result.get("error"):
+                print(f"{Color.RED}❌ {result['error']}{Color.RESET}")
+            elif result.get("generated", 0) == 0:
+                print(f"{Color.DIM}未生成新话题{Color.RESET}")
+            else:
+                print(f"{Color.GREEN}✅ 生成了{result['generated']}条话题！{Color.RESET}")
+                print(f"  可用话题: {result.get('total_unused', 0)}")
+                for t in result.get("topics", []):
+                    cat_names = {"anime": "动漫", "game": "游戏", "tech": "科技",
+                                 "history": "历史", "fun": "趣味", "daily": "日常",
+                                 "emotion": "情感"}
+                    print(f"    [{cat_names.get(t['category'], t['category'])}] {t['title']}")
+
+        elif sub == "next":
+            topic = self.core.topic_next()
+            if not topic:
+                print(f"{Color.DIM}没有可用话题，用 /topic gen 生成一些{Color.RESET}")
+            else:
+                cat_names = {"anime": "动漫", "game": "游戏", "tech": "科技",
+                             "history": "历史", "fun": "趣味", "daily": "日常",
+                             "emotion": "情感"}
+                print(f"{Color.PINK}【{cat_names.get(topic['category'], topic['category'])}】{topic['title']}{Color.RESET}")
+                print(f"  {topic['content']}")
+                if topic.get("tags"):
+                    print(f"  标签: {', '.join(topic['tags'])}")
+
+        elif sub == "peek":
+            topics = self.core.topic_peek()
+            if not topics:
+                print(f"{Color.DIM}没有可用话题，用 /topic gen 生成一些{Color.RESET}")
+            else:
+                print(f"{Color.DIM}─── 话题预览 ───{Color.RESET}")
+                cat_names = {"anime": "动漫", "game": "游戏", "tech": "科技",
+                             "history": "历史", "fun": "趣味", "daily": "日常",
+                             "emotion": "情感"}
+                for t in topics:
+                    print(f"  [{cat_names.get(t['category'], t['category'])}] {t['title']}")
+                    print(f"    {t['content']}")
+
+        else:
+            print(f"  {Color.DIM}/topic stats | /topic gen | /topic next | /topic peek{Color.RESET}")
+
+    def _handle_skill(self, parts):
+        """处理 /skill 命令 — 技能自学习系统"""
+        sub = parts[1] if len(parts) > 1 else "status"
+
+        if sub == "status":
+            eval_status = self.core.skill_eval_status()
+            learn_status = self.core.skill_learn_status()
+
+            print(f"{Color.DIM}─── 技能自学习 ───{Color.RESET}")
+
+            if eval_status.get("enabled", True) and "total_evaluations" in eval_status:
+                print(f"  评分器:")
+                print(f"    总评估: {eval_status.get('total_evaluations', 0)}")
+                print(f"    通过率: {eval_status.get('pass_rate', 0)}%")
+            else:
+                print(f"  评分器: {Color.DIM}未启用{Color.RESET}")
+
+            if learn_status.get("enabled", True) and "total_cycles" in learn_status:
+                print(f"  自学习:")
+                print(f"    总循环: {learn_status.get('total_cycles', 0)}")
+                print(f"    已固化: {learn_status.get('solidified', 0)}")
+                print(f"    成功率: {learn_status.get('success_rate', 0)}%")
+            else:
+                print(f"  自学习: {Color.DIM}未启用{Color.RESET}")
+
+        elif sub == "eval":
+            print(f"{Color.YELLOW}⏳ 正在评估最近回复...{Color.RESET}")
+            result = self.core.skill_eval_quick()
+            if result.get("error"):
+                print(f"{Color.RED}❌ {result['error']}{Color.RESET}")
+            else:
+                scores = result.get("scores", {})
+                dim_names = {"identity": "身份一致性", "personality": "性格标尺",
+                             "boundary": "边界遵守", "naturalness": "表达自然度",
+                             "anti_ai": "反AI味"}
+                print(f"{Color.DIM}─── 评估结果 ───{Color.RESET}")
+                for dim, score in scores.items():
+                    bar = "█" * int(score) + "░" * (10 - int(score))
+                    color = Color.GREEN if score >= 7 else Color.YELLOW if score >= 5 else Color.RED
+                    print(f"  {dim_names.get(dim, dim):8s} {color}{bar} {score}{Color.RESET}")
+                print(f"  平均分: {result.get('average', 0)}")
+                weakest = result.get("weakest")
+                if weakest and scores.get(weakest, 10) < 7:
+                    print(f"  {Color.YELLOW}⚠ 最弱项: {dim_names.get(weakest, weakest)}{Color.RESET}")
+
+        elif sub == "learn":
+            print(f"{Color.YELLOW}⏳ 执行自学习循环（可能需要一些时间）...{Color.RESET}")
+            result = self.core.skill_learn_run()
+            if result.get("error"):
+                print(f"{Color.RED}❌ {result['error']}{Color.RESET}")
+            elif not result.get("success"):
+                print(f"{Color.DIM}本次未固化新技能{Color.RESET}")
+                if result.get("reason"):
+                    print(f"  原因: {result['reason']}")
+                for lr in result.get("learning_results", []):
+                    dim_names = {"identity": "身份一致性", "personality": "性格标尺",
+                                 "naturalness": "表达自然度", "anti_ai": "反AI味"}
+                    dim = lr.get("dimension", "?")
+                    print(f"  [{dim_names.get(dim, dim)}] {lr.get('issue', '')[:60]}")
+                    if lr.get("error"):
+                        print(f"    {Color.RED}✗ {lr['error']}{Color.RESET}")
+            else:
+                solidified = sum(1 for lr in result.get("learning_results", [])
+                                 if lr.get("solidified"))
+                print(f"{Color.GREEN}✅ 固化了{solidified}条新技能！{Color.RESET}")
+                for lr in result.get("learning_results", []):
+                    if lr.get("solidified"):
+                        rule = lr.get("rule", {})
+                        print(f"  ✅ {rule.get('name', '?')}: {rule.get('description', '')[:60]}")
+
+        else:
+            print(f"  {Color.DIM}/skill status | /skill eval | /skill learn{Color.RESET}")
+
+    def _handle_publish(self, parts):
+        """处理 /publish 命令 — 代码发布与核验"""
+        sub = parts[1] if len(parts) > 1 else "status"
+
+        if sub == "status":
+            status = self.core.publish_status()
+            print(f"{Color.DIM}─── 代码发布与核验 ───{Color.RESET}")
+            if status.get("enabled", False) or "total_requests" in status:
+                print(f"  总请求: {status.get('total_requests', 0)}")
+                print(f"  待核验: {status.get('pending', 0)}")
+                print(f"  已批准: {status.get('approved', 0)}")
+                print(f"  已驳回: {status.get('rejected', 0)}")
+            else:
+                print(f"  {Color.DIM}未启用（需在config.json中配置code_publisher）{Color.RESET}")
+
+        elif sub == "pending":
+            pending = self.core.publish_pending()
+            if not pending:
+                print(f"  {Color.DIM}无待核验请求{Color.RESET}")
+            else:
+                print(f"{Color.DIM}─── 待核验请求 ───{Color.RESET}")
+                for req in pending:
+                    audit = req.get("l1_audit", {})
+                    block = audit.get("auto_block", False)
+                    icon = f"{Color.RED}🔴" if block else f"{Color.YELLOW}🟡"
+                    print(f"  {icon} {req['id']}{Color.RESET}")
+                    print(f"    分支: {req['branch']}")
+                    print(f"    描述: {req.get('description', '')}")
+                    print(f"    文件: {', '.join(req.get('files', []))}")
+                    print(f"    审计: {audit.get('critical', 0)} CRITICAL / {audit.get('warnings', 0)} WARN")
+                    if block:
+                        print(f"    {Color.RED}⚠ 自动拦截（存在CRITICAL问题）{Color.RESET}")
+
+        elif sub == "review":
+            req_id = parts[2] if len(parts) > 2 else None
+            detail = self.core.publish_review_detail(req_id)
+            if detail.get("error") or detail.get("message"):
+                print(f"  {Color.DIM}{detail.get('error', detail.get('message', '无'))}{Color.RESET}")
+            else:
+                print(f"{Color.DIM}─── 核验详情 ───{Color.RESET}")
+                print(f"  ID: {detail.get('id', '?')}")
+                print(f"  分支: {detail.get('branch', '?')}")
+                print(f"  描述: {detail.get('description', '')}")
+                print(f"  状态: {detail.get('status', '?')}")
+                print(f"  文件: {', '.join(detail.get('files', []))}")
+                audit = detail.get("l1_audit", {})
+                if audit:
+                    print(f"  L1审计: {audit.get('critical', 0)}C / {audit.get('warnings', 0)}W / {audit.get('info', 0)}I")
+                    for issue in audit.get("issues", [])[:5]:
+                        sev = issue.get("severity", "?")
+                        color = Color.RED if sev == "CRITICAL" else Color.YELLOW if sev == "WARNING" else Color.DIM
+                        print(f"    {color}[{sev}] {issue.get('file','')}:{issue.get('line','')} {issue.get('description','')}{Color.RESET}")
+
+        elif sub == "approve":
+            req_id = parts[2] if len(parts) > 2 else ""
+            if not req_id:
+                print(f"  {Color.RED}用法: /publish approve <request_id>{Color.RESET}")
+            else:
+                notes = " ".join(parts[3:]) if len(parts) > 3 else ""
+                result = self.core.publish_approve(req_id, notes)
+                if result.get("success"):
+                    print(f"  {Color.GREEN}✅ 已批准并合并到主分支{Color.RESET}")
+                else:
+                    print(f"  {Color.RED}❌ {result.get('error', '失败')}{Color.RESET}")
+
+        elif sub == "reject":
+            req_id = parts[2] if len(parts) > 2 else ""
+            if not req_id:
+                print(f"  {Color.RED}用法: /publish reject <request_id> [原因]{Color.RESET}")
+            else:
+                reason = " ".join(parts[3:]) if len(parts) > 3 else "未提供原因"
+                result = self.core.publish_reject(req_id, reason)
+                if result.get("success"):
+                    print(f"  {Color.YELLOW}✅ 已驳回: {reason}{Color.RESET}")
+                else:
+                    print(f"  {Color.RED}❌ {result.get('error', '失败')}{Color.RESET}")
+
+        else:
+            print(f"  {Color.DIM}/publish status | /publish pending | /publish review | /publish approve <id> | /publish reject <id>{Color.RESET}")
+
+    def _handle_group(self, parts):
+        """处理 /group 命令 — 群聊管理"""
+        sub = parts[1] if len(parts) > 1 else "status"
+
+        if sub == "status":
+            status = self.core.group_status()
+            print(f"{Color.DIM}─── 群聊系统 ───{Color.RESET}")
+            if status.get("enabled", True) and "total_groups" in status:
+                print(f"  群数: {status.get('total_groups', 0)}")
+                print(f"  总成员: {status.get('total_members', 0)}")
+                for g in status.get("groups", []):
+                    print(f"  {Color.CYAN}{g['group_id']}{Color.RESET} ({g.get('name', '?')}) — {g['members']}人")
+            else:
+                print(f"  {Color.DIM}未启用{Color.RESET}")
+
+        elif sub == "members":
+            group_id = parts[2] if len(parts) > 2 else ""
+            if not group_id:
+                print(f"  {Color.RED}用法: /group members <group_id>{Color.RESET}")
+            else:
+                members = self.core.group_members(group_id)
+                if not members:
+                    print(f"  {Color.DIM}无成员数据{Color.RESET}")
+                else:
+                    print(f"{Color.DIM}─── {group_id} 成员 ───{Color.RESET}")
+                    for m in members:
+                        icon = "👑" if m.get("is_master") else "  "
+                        bar = "█" * int(m["intimacy"] / 10) + "░" * (10 - int(m["intimacy"] / 10))
+                        print(f"  {icon} {m['nickname'] or m['user_id']:12s} {Color.CYAN}{bar} {m['intimacy']}{Color.RESET} ({m['message_count']}条)")
+
+        elif sub == "intimacy":
+            if len(parts) < 5:
+                print(f"  {Color.RED}用法: /group intimacy <group_id> <user_id> <value>{Color.RESET}")
+            else:
+                gid = parts[2]
+                uid = parts[3]
+                try:
+                    val = float(parts[4])
+                    result = self.core.group_set_intimacy(gid, uid, val)
+                    if result.get("success"):
+                        print(f"  {Color.GREEN}✅ {uid} 亲密度设为 {val}{Color.RESET}")
+                    else:
+                        print(f"  {Color.RED}❌ {result.get('error')}{Color.RESET}")
+                except ValueError:
+                    print(f"  {Color.RED}value必须是数字{Color.RESET}")
+
+        else:
+            print(f"  {Color.DIM}/group status | /group members <id> | /group intimacy <gid> <uid> <val>{Color.RESET}")
+
+    def _handle_router(self, parts):
+        """处理 /router 命令 — 插件路由器"""
+        sub = parts[1] if len(parts) > 1 else "status"
+
+        if sub == "status":
+            status = self.core.router_status()
+            print(f"{Color.DIM}─── 插件路由器 ───{Color.RESET}")
+            if status.get("enabled", True) and "total_tracked" in status:
+                print(f"  追踪插件: {status.get('total_tracked', 0)}")
+                print(f"  活跃: {status.get('active', 0)}")
+                print(f"  休眠: {status.get('dormant', 0)}")
+                if status.get("dormant_list"):
+                    print(f"  休眠列表: {', '.join(status['dormant_list'])}")
+                if status.get("most_used"):
+                    print(f"  最常用:")
+                    for name, info in status["most_used"]:
+                        print(f"    {name}: {info.get('count', 0)}次")
+            else:
+                print(f"  {Color.DIM}未启用{Color.RESET}")
+
+        elif sub == "route":
+            # 用最近一条用户消息做路由测试
+            msg = " ".join(parts[2:]) if len(parts) > 2 else ""
+            if not msg:
+                recent = [m for m in self.core.history if m.get("role") == "user"]
+                if recent:
+                    msg = recent[-1]["content"]
+                    print(f"  {Color.DIM}使用最近消息: {msg[:50]}...{Color.RESET}")
+                else:
+                    print(f"  {Color.RED}用法: /router route <消息内容>{Color.RESET}")
+                    return
+
+            result = self.core.router_route(msg)
+            if result.get("error"):
+                print(f"  {Color.RED}❌ {result['error']}{Color.RESET}")
+            else:
+                task_names = {"chat": "闲聊", "deep_talk": "深层对话",
+                              "tool_task": "工具任务", "memory_ops": "记忆整理",
+                              "growth": "成长操作"}
+                print(f"{Color.DIM}─── 路由决策 ───{Color.RESET}")
+                print(f"  任务类型: {task_names.get(result['task_type'], result['task_type'])}")
+                print(f"  激活插件: {', '.join(result['active_plugins'])}")
+                print(f"  加载顺序: {' → '.join(result['load_order'])}")
+                print(f"  预估token: ~{result['est_tokens']}")
+                if result.get("psi_adjustments"):
+                    print(f"  PSI调制:")
+                    for adj in result["psi_adjustments"]:
+                        print(f"    {Color.YELLOW}{adj}{Color.RESET}")
+
+        else:
+            print(f"  {Color.DIM}/router status | /router route [消息]{Color.RESET}")
+
+    def _handle_audit(self, parts):
+        """处理 /audit 命令 — 回执审计"""
+        sub = parts[1] if len(parts) > 1 else "status"
+
+        if sub == "status":
+            stats = self.core.audit_status()
+            print(f"{Color.DIM}─── 回执审计 ───{Color.RESET}")
+            if stats.get("enabled", True) and "total" in stats:
+                print(f"  总记录: {stats.get('total', 0)}")
+                by_type = stats.get("by_type", {})
+                if by_type:
+                    for t, c in by_type.items():
+                        labels = {"llm_call": "LLM调用", "tool_call": "工具调用",
+                                  "evolution": "进化操作", "memory_op": "记忆操作"}
+                        print(f"    {labels.get(t, t)}: {c}")
+                if stats.get("tool_failures", 0):
+                    print(f"  {Color.RED}工具失败: {stats['tool_failures']}{Color.RESET}")
+                if stats.get("evolution_rollbacks", 0):
+                    print(f"  {Color.YELLOW}进化回退: {stats['evolution_rollbacks']}{Color.RESET}")
+                print(f"  日志大小: {stats.get('log_file_size', '?')}")
+            else:
+                print(f"  {Color.DIM}未启用{Color.RESET}")
+
+        elif sub == "recent":
+            limit = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 10
+            records = self.core.audit_recent(limit)
+            if not records:
+                print(f"  {Color.DIM}无审计记录{Color.RESET}")
+            else:
+                print(f"{Color.DIM}─── 最近{len(records)}条审计 ───{Color.RESET}")
+                labels = {"llm_call": "LLM", "tool_call": "TOOL",
+                          "evolution": "EVOL", "memory_op": "MEM"}
+                for r in records:
+                    rtype = r.get("type", "?")
+                    ts = r.get("timestamp", "")[11:19]
+                    data = r.get("data", {})
+                    icon = {"llm_call": "🤖", "tool_call": "🔧",
+                            "evolution": "🧬", "memory_op": "📝"}.get(rtype, "❓")
+                    preview = ""
+                    if rtype == "llm_call":
+                        preview = data.get("user_message_preview", "")[:40]
+                    elif rtype == "tool_call":
+                        preview = f"{data.get('tool', '?')} {'✅' if data.get('success') else '❌'}"
+                    elif rtype == "evolution":
+                        preview = f"{data.get('action', '?')} {'↩️回退' if data.get('rolled_back') else '✅'}"
+                    elif rtype == "memory_op":
+                        preview = f"{data.get('operation', '?')}"
+                    print(f"  {icon} {ts} [{labels.get(rtype, '?')}] {preview}")
+
+        elif sub == "query":
+            rtype = parts[2] if len(parts) > 2 else None
+            type_map = {"llm": "llm_call", "tool": "tool_call",
+                        "evolution": "evolution", "memory": "memory_op"}
+            if rtype and rtype in type_map:
+                rtype = type_map[rtype]
+            elif rtype and rtype not in type_map.values():
+                rtype = None
+            records = self.core.audit_query(record_type=rtype)
+            if not records:
+                print(f"  {Color.DIM}无匹配记录{Color.RESET}")
+            else:
+                print(f"  找到{len(records)}条记录")
+
+        else:
+            print(f"  {Color.DIM}/audit status | /audit recent [n] | /audit query [type]{Color.RESET}")
+
+    def _handle_boundary(self, parts: list):
+        """处理 /boundary 命令 — 边界硬拦截"""
+        if not self.core or not self.core.boundary:
+            print(f"{Color.DIM}边界拦截器未启用{Color.RESET}")
+            return
+
+        sub = parts[1] if len(parts) > 1 else "status"
+
+        if sub == "status":
+            stats = self.core.boundary_status()
+            print(f"{Color.DIM}─── 边界硬拦截 ───{Color.RESET}")
+            print(f"  启用: {stats.get('enabled', '?')}")
+            print(f"  严格模式: {stats.get('strict_mode', False)}")
+            print(f"  总检查: {stats.get('total_checked', 0)}")
+            print(f"  {Color.GREEN}通过: {stats.get('passed', 0)}{Color.RESET}")
+            print(f"  {Color.YELLOW}警告: {stats.get('warned', 0)}{Color.RESET}")
+            print(f"  {Color.RED}拦截: {stats.get('blocked', 0)}{Color.RESET}")
+            print(f"  拦截率: {stats.get('block_rate', '0/0')}")
+            if stats.get('block_reasons'):
+                print(f"  {Color.DIM}拦截原因:{Color.RESET}")
+                for reason, count in stats['block_reasons'].items():
+                    print(f"    {reason}: {count}次")
+
+        elif sub == "check" and len(parts) > 2:
+            text = " ".join(parts[2:])
+            result = self.core.boundary_check(text)
+            level = result.get('level', 'PASS')
+            color = Color.RED if level == "BLOCK" else (Color.YELLOW if level == "WARN" else Color.GREEN)
+            print(f"  {color}级别: {level}{Color.RESET}")
+            print(f"  结果: {result.get('result', '')[:200]}")
+
+        elif sub == "reset":
+            self.core.boundary_reset()
+            print(f"  {Color.GREEN}拦截统计已重置{Color.RESET}")
+
+        elif sub == "strict":
+            self.core.boundary.strict_mode = not self.core.boundary.strict_mode
+            state = "开启" if self.core.boundary.strict_mode else "关闭"
+            print(f"  严格模式已{state}")
+
+        else:
+            print(f"  {Color.DIM}/boundary status | /boundary check <文本> | /boundary reset | /boundary strict{Color.RESET}")
+
+    def _handle_template(self, parts: list):
+        """处理 /template 命令 — 插件模板填充器"""
+        if not self.core or not self.core.template_filler:
+            print(f"{Color.DIM}模板填充器未启用{Color.RESET}")
+            return
+
+        sub = parts[1] if len(parts) > 1 else "status"
+
+        if sub == "status":
+            stats = self.core.template_status()
+            print(f"{Color.DIM}─── 插件模板填充器 ───{Color.RESET}")
+            print(f"  启用: {stats.get('enabled', '?')}")
+            print(f"  可用模板: {', '.join(stats.get('available_templates', []))}")
+            print(f"  总创建: {stats.get('total_created', 0)}")
+            if stats.get('recent_creations'):
+                print(f"  {Color.DIM}最近创建:{Color.RESET}")
+                for c in stats['recent_creations']:
+                    print(f"    {c.get('name', '?')} ({c.get('template', '?')}) - {c.get('time', '?')}")
+
+        elif sub == "list":
+            templates = self.core.template_list()
+            print(f"{Color.DIM}─── 可用模板 ───{Color.RESET}")
+            for name, desc in templates.items():
+                print(f"  {Color.CYAN}{name}{Color.RESET}: {desc}")
+
+        elif sub == "create" and len(parts) > 2:
+            requirement = " ".join(parts[2:])
+            plugin_name = None
+            # 支持 /template create <name> <需求> 格式
+            if len(parts) > 3 and not parts[2].startswith(" ") and "=" in parts[2]:
+                plugin_name = parts[2].split("=")[1]
+                requirement = " ".join(parts[3:])
+
+            print(f"{Color.DIM}正在创建插件... 需求: {requirement}{Color.RESET}")
+            result = self.core.template_create(requirement, plugin_name)
+            if result.get('success'):
+                print(f"  {Color.GREEN}✅ {result.get('message', '创建成功')}{Color.RESET}")
+                print(f"  模板: {result.get('template_type', '?')}")
+                print(f"  插件名: {result.get('plugin_name', '?')}")
+            else:
+                print(f"  {Color.RED}❌ {result.get('message', '创建失败')}{Color.RESET}")
+                if result.get('errors'):
+                    for e in result['errors']:
+                        print(f"    - {e}")
+
+        else:
+            print(f"  {Color.DIM}/template status | /template list | /template create <需求描述>{Color.RESET}")
+
+    def _handle_code(self, parts: list):
+        """处理 /code 命令 — 代码执行沙箱 + 调试循环"""
+        if not self.core:
+            print(f"{Color.DIM}核心未初始化{Color.RESET}")
+            return
+
+        sub = parts[1] if len(parts) > 1 else "status"
+
+        if sub == "status":
+            stats = self.core.code_status()
+            print(f"{Color.DIM}─── 代码沙箱 ───{Color.RESET}")
+            exe = stats.get("executor", {})
+            print(f"  沙箱: {'✅启用' if exe.get('enabled', False) else '❌未启用'}")
+            if exe.get("enabled"):
+                print(f"  执行次数: {exe.get('total_executions', 0)}")
+                print(f"  超时限制: {exe.get('timeout', 10)}s | 内存限制: {exe.get('memory_limit_mb', 256)}MB")
+                print(f"  平台: {exe.get('platform', '?')}")
+            dbg = stats.get("debug_loop", {})
+            print(f"  调试循环: {'✅启用' if dbg.get('enabled', False) else '❌未启用'}")
+            if dbg.get("enabled"):
+                print(f"  调试次数: {dbg.get('total_runs', 0)} (成功率: {dbg.get('success_rate', '?')})")
+                print(f"  平均迭代: {dbg.get('avg_iterations', 0)} | 上限: {dbg.get('max_iterations', 5)}")
+
+        elif sub == "run" and len(parts) > 2:
+            code = " ".join(parts[2:])
+            print(f"{Color.DIM}执行代码...{Color.RESET}")
+            result = self.core.code_run(code)
+            if result.get("success"):
+                print(f"  {Color.GREEN}✅ 执行成功{Color.RESET} ({result.get('execution_time', 0):.2f}s)")
+                if result.get("stdout"):
+                    print(f"  {Color.DIM}输出:{Color.RESET}")
+                    for line in result["stdout"].rstrip("\n").split("\n"):
+                        print(f"    {line}")
+                if result.get("result"):
+                    print(f"  {Color.DIM}返回值: {result['result']}{Color.RESET}")
+            else:
+                print(f"  {Color.RED}❌ 执行失败{Color.RESET}")
+                if result.get("error_type"):
+                    print(f"  错误类型: {result['error_type']}")
+                if result.get("error_message"):
+                    print(f"  {result['error_message']}")
+                if result.get("stderr"):
+                    print(f"  {Color.DIM}stderr:{Color.RESET}")
+                    for line in result["stderr"].rstrip("\n").split("\n")[:5]:
+                        print(f"    {line}")
+
+        elif sub == "debug" and len(parts) > 2:
+            code = " ".join(parts[2:])
+            print(f"{Color.DIM}调试循环启动...{Color.RESET}")
+            result = self.core.code_debug(code)
+            if result.get("success"):
+                print(f"  {Color.GREEN}✅ 调试成功{Color.RESET}")
+                print(f"  迭代次数: {result.get('iterations', 0)}")
+                if result.get("final_output"):
+                    print(f"  {Color.DIM}最终输出:{Color.RESET}")
+                    for line in result["final_output"].rstrip("\n").split("\n"):
+                        print(f"    {line}")
+            else:
+                print(f"  {Color.RED}❌ 调试失败{Color.RESET} (迭代 {result.get('iterations', 0)} 次)")
+                if result.get("history"):
+                    last = result["history"][-1]
+                    if last.get("result", {}).get("error_message"):
+                        print(f"  最后错误: {last['result']['error_message']}")
+
+        elif sub == "history":
+            history = self.core.code_history()
+            if not history:
+                print(f"  {Color.DIM}暂无调试历史{Color.RESET}")
+            else:
+                print(f"{Color.DIM}─── 调试历史 (最近{len(history)}条) ───{Color.RESET}")
+                for i, h in enumerate(history):
+                    success = "✅" if h.get("success") else "❌"
+                    iters = h.get("iterations", 0)
+                    print(f"  {i+1}. {success} {iters}轮 - {h.get('timestamp', '?')}")
+
+        else:
+            print(f"  {Color.DIM}/code status | /code run <代码> | /code debug <代码> | /code history{Color.RESET}")
+
+    def _print_help(self):
+        print(f"{Color.DIM}─── 命令 ───{Color.RESET}")
+        print(f"  {Color.CYAN}/help{Color.RESET}              显示帮助")
+        print(f"  {Color.CYAN}/status{Color.RESET}            查看状态")
+        print(f"  {Color.CYAN}/psi{Color.RESET}               查看内在状态")
+        print(f"  {Color.CYAN}/diary auto{Color.RESET}        自动写日记")
+        print(f"  {Color.CYAN}/diary write <内容>{Color.RESET} 手动写日记")
+        print(f"  {Color.CYAN}/diary read{Color.RESET}        查看日记")
+        print(f"  {Color.CYAN}/growth scan{Color.RESET}       扫描新行为")
+        print(f"  {Color.CYAN}/growth stats{Color.RESET}      成长统计")
+        print(f"  {Color.CYAN}/memory{Color.RESET}            查看记忆")
+        print(f"  {Color.CYAN}/memory add <内容>{Color.RESET}  添加记忆")
+        print(f"  {Color.CYAN}/memory stats{Color.RESET}       记忆统计")
+        print(f"  {Color.CYAN}/entities{Color.RESET}           查看实体图")
+        print(f"  {Color.CYAN}/events{Color.RESET}             查看事件轨迹")
+        print(f"  {Color.CYAN}/cells{Color.RESET}              查看体细胞")
+        print(f"  {Color.CYAN}/feedback{Color.RESET}           查看活体约束层")
+        print(f"  {Color.CYAN}/obs{Color.RESET}               观察者调试面板")
+        print(f"  {Color.CYAN}/snap{Color.RESET}              快照与版本回退")
+        print(f"  {Color.CYAN}/daemon{Color.RESET}            守护进程状态")
+        print(f"  {Color.CYAN}/daemon run{Color.RESET}        手动执行一轮")
+        print(f"  {Color.CYAN}/daemon vitals{Color.RESET}     查看生命体征")
+        print(f"  {Color.CYAN}/reflect{Color.RESET}            长在线思考系统状态")
+        print(f"  {Color.CYAN}/reflect run{Color.RESET}        手动触发每日反思")
+        print(f"  {Color.CYAN}/reflect diary{Color.RESET}      查看知觉日记")
+        print(f"  {Color.CYAN}/reflect want{Color.RESET}       查看想说的话")
+        print(f"  {Color.CYAN}/reflect trigger{Color.RESET}    手动检查PSI压力")
+        print(f"  {Color.CYAN}/route{Color.RESET}             认知路由统计")
+        print(f"  {Color.CYAN}/route stats{Color.RESET}       路由详细统计")
+        print(f"  {Color.CYAN}/route on|off{Color.RESET}      开关路由层")
+        print(f"  {Color.CYAN}/plugin{Color.RESET}            插件管理")
+        print(f"  {Color.CYAN}/plugin on|off <name>{Color.RESET} 开关插件")
+        print(f"  {Color.CYAN}/roadmap{Color.RESET}           自研路线图")
+        print(f"  {Color.CYAN}/roadmap list{Color.RESET}      列出所有idea")
+        print(f"  {Color.CYAN}/roadmap add <描述>{Color.RESET} 添加需求")
+        print(f"  {Color.CYAN}/compile{Color.RESET}            记忆编译层")
+        print(f"  {Color.CYAN}/compile run{Color.RESET}        手动编译")
+        print(f"  {Color.CYAN}/compile lint{Color.RESET}       健康检查")
+        print(f"  {Color.CYAN}/compile stats{Color.RESET}      编译统计")
+        print(f"  {Color.CYAN}/topic{Color.RESET}              主动话题")
+        print(f"  {Color.CYAN}/topic gen{Color.RESET}          生成话题")
+        print(f"  {Color.CYAN}/topic next{Color.RESET}         取下一条")
+        print(f"  {Color.CYAN}/topic peek{Color.RESET}         预览话题")
+        print(f"  {Color.CYAN}/skill{Color.RESET}              技能自学习")
+        print(f"  {Color.CYAN}/skill eval{Color.RESET}         评估回复")
+        print(f"  {Color.CYAN}/skill learn{Color.RESET}        自学习循环")
+        print(f"  {Color.CYAN}/skill status{Color.RESET}       自学习状态")
+        print(f"  {Color.CYAN}/publish{Color.RESET}            代码发布与核验")
+        print(f"  {Color.CYAN}/publish pending{Color.RESET}    待核验列表")
+        print(f"  {Color.CYAN}/publish review{Color.RESET}     核验详情")
+        print(f"  {Color.CYAN}/publish approve{Color.RESET}    批准核验")
+        print(f"  {Color.CYAN}/publish reject{Color.RESET}     驳回核验")
+        print(f"  {Color.CYAN}/group{Color.RESET}              群聊管理")
+        print(f"  {Color.CYAN}/group status{Color.RESET}       群聊状态")
+        print(f"  {Color.CYAN}/group members{Color.RESET}     群成员列表")
+        print(f"  {Color.CYAN}/router{Color.RESET}             插件路由器")
+        print(f"  {Color.CYAN}/router status{Color.RESET}      路由器状态")
+        print(f"  {Color.CYAN}/router route{Color.RESET}       路由决策测试")
+        print(f"  {Color.CYAN}/audit{Color.RESET}              回执审计")
+        print(f"  {Color.CYAN}/audit status{Color.RESET}      审计统计")
+        print(f"  {Color.CYAN}/audit recent{Color.RESET}      最近记录")
+        print(f"  {Color.CYAN}/boundary{Color.RESET}           边界硬拦截")
+        print(f"  {Color.CYAN}/boundary check{Color.RESET}     检查文本")
+        print(f"  {Color.CYAN}/template{Color.RESET}            插件模板填充")
+        print(f"  {Color.CYAN}/template list{Color.RESET}      可用模板")
+        print(f"  {Color.CYAN}/template create{Color.RESET}    创建插件")
+        print(f"  {Color.CYAN}/clear{Color.RESET}             清空对话")
+        print(f"  {Color.CYAN}/save{Color.RESET}              保存对话")
+        print(f"  {Color.CYAN}/exit{Color.RESET}              退出（自动保存）")
+
+    def _print_welcome(self):
+        cat = r"""
+  /\_/\
+ ( o.o )
+  > ^ <
+"""
+        print(f"{Color.PINK}{cat}{Color.RESET}")
+        print(f"  {Color.BOLD}知乐 · 本地运行器{Color.RESET}")
+        print(f"  {Color.DIM}Phase 3 · 有灵魂了{Color.RESET}")
+        print(f"  {Color.DIM}DNA {self.dna.get_dna_version()} | "
+              f"模型 {self.llm.model}{Color.RESET}")
+        if self.memory:
+            stats = self.memory.get_stats()
+            if stats['active'] > 0:
+                print(f"  {Color.DIM}记忆: {stats['active']}条{Color.RESET}", end="")
+        if self.psi:
+            psi_stats = self.psi.get_stats()
+            # 显示最需要关注的需求
+            low_needs = [name for name, status in psi_stats["needs"].items()
+                         if "赤字" in status]
+            if low_needs:
+                print(f"  {Color.RED}PSI赤字: {', '.join(low_needs)}{Color.RESET}",
+                      end="")
+            else:
+                print(f"  {Color.DIM}PSI: 正常{Color.RESET}", end="")
+            print(f"  {Color.DIM}意识帧: {psi_stats['consciousness_frame']}{Color.RESET}")
+        print(f"\n  {Color.DIM}─────────────────────{Color.RESET}")
+        print(f"  {Color.DIM}输入消息开始聊天，/help 查看命令{Color.RESET}")

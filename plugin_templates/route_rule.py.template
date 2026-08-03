@@ -1,0 +1,39 @@
+#!/usr/bin/env python3
+"""
+插件模板：认知路由规则
+匹配用户消息模式，返回预设回复或触发动作
+"""
+
+from plugin_base import MessagePlugin
+
+
+class Plugin(MessagePlugin):
+    PLUGIN_TYPE = "message"
+    NAME = "{{PLUGIN_NAME}}"
+    DESCRIPTION = "{{PLUGIN_DESC}}"
+    VERSION = "1.0"
+
+    def __init__(self, config=None, core=None):
+        super().__init__(config, core)
+        import re
+        self._pattern = re.compile(r"{{TRIGGER_PATTERN}}")
+
+    def on_user_message(self, message: str) -> str:
+        return message
+
+    def on_post_llm(self, response: str) -> str:
+        return response
+
+    def on_shortcut(self, response: str, route_label: str) -> str:
+        return response
+
+    def get_context(self) -> str:
+        return ""
+
+    def match(self, message: str) -> bool:
+        """检查消息是否匹配路由规则"""
+        return bool(self._pattern.search(message))
+
+    def reply(self) -> str:
+        """返回预设回复"""
+        return "{{REPLY_TEMPLATE}}"

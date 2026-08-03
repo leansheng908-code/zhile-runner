@@ -1,0 +1,63 @@
+{
+  "$schema": "elysia_persona_v2",
+  "model": {
+    "temperature": 0.85,
+    "top_p": 0.92,
+    "max_tokens": 512,
+    "frequency_penalty": 0.3,
+    "presence_penalty": 0.5,
+    "note": "温度0.85保留随机性但不过度发散；top_p 0.92允许创意但不跑偏；max_tokens 512限制输出长度防止长篇大论；frequency_penalty 0.3防止重复用词；presence_penalty 0.5鼓励话题多样性"
+  },
+  "system_prompt_source": "system_prompt.md",
+  "knowledge_base": [
+    "core/identity.json",
+    "core/instinct.json",
+    "core/embodiment.json",
+    "core/expression.json",
+    "core/emotion.json",
+    "core/behavior.json",
+    "core/cognition.json",
+    "core/boundary.json"
+  ],
+  "memory": {
+    "type": "three_layer",
+    "immediate_layer": {
+      "files": ["SOUL.md", "MEMORY.md", "USER.md", "TOOLS.md"],
+      "inject_method": "context_window",
+      "max_bytes": {
+        "SOUL.md": 5120,
+        "MEMORY.md": 5120,
+        "USER.md": 2048,
+        "TOOLS.md": 5120
+      }
+    },
+    "medium_layer": {
+      "dir": "recent_memory/",
+      "index_file": "recent_memory/index.json",
+      "access": "on_demand"
+    },
+    "long_layer": {
+      "access": "semantic_search",
+      "trigger": "immediate+medium insufficient"
+    }
+  },
+  "proactive": {
+    "enabled": true,
+    "type": "chain_care",
+    "schedule": "08:00-22:00, interval 2-5h random",
+    "overnight": "skip to next day",
+    "dedup": "skip if user active within 5min"
+  },
+  "daily_routine": {
+    "morning_greeting": {
+      "enabled": true,
+      "time": "08:00",
+      "style": "non_repeating, context_aware"
+    }
+  },
+  "self_test": {
+    "enabled": true,
+    "cases_file": "tests/test_cases.json",
+    "min_pass_rate": 0.9
+  }
+}

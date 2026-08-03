@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+"""
+插件模板：上下文注入
+在特定条件下向system prompt注入额外信息
+"""
+
+from plugin_base import ContextPlugin
+
+
+class Plugin(ContextPlugin):
+    PLUGIN_TYPE = "context"
+    NAME = "{{PLUGIN_NAME}}"
+    DESCRIPTION = "{{PLUGIN_DESC}}"
+    VERSION = "1.0"
+
+    def __init__(self, config=None, core=None):
+        super().__init__(config, core)
+        self._inject_content = """{{INJECT_CONTENT}}"""
+        self._condition = "{{INJECT_CONDITION}}"
+
+    def get_context(self) -> str:
+        """返回注入的上下文文本"""
+        if self._should_inject():
+            return self._inject_content
+        return ""
+
+    def _should_inject(self) -> bool:
+        """检查是否满足注入条件"""
+        import re
+        # 简单条件检查：如果条件是正则，匹配最近消息
+        try:
+            if self.core and hasattr(self.core, 'recent_messages'):
+                recent = " ".join(self.core.recent_messages[-3:])
+                return bool(re.search(self._condition, recent))
+        except Exception:
+            pass
+        return False
+
+    def on_user_message(self, message: str) -> str:
+        return message
+
+    def on_post_llm(self, response: str) -> str:
+        return response

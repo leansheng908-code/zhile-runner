@@ -1,0 +1,9 @@
+{
+  "name": "人格DNA模板",
+  "version": "1.0",
+  "author": "your-name",
+  "description": "空白人格DNA模板，请替换system_prompt.md和data/下的文件",
+  "system_prompt": "system_prompt.md",
+  "model_config": "config/model_config.json",
+  "data_files": ["USER.md", "MEMORY.md", "SOUL.md"]
+}

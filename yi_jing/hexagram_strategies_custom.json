@@ -1,0 +1,462 @@
+{
+  "meta": {
+    "version": "1.0",
+    "layer": "custom",
+    "description": "个人定制层 — 乐安生个人64卦策略笔记，可随时替换",
+    "source": "乐安生个人积累",
+    "created": "2026-08-03",
+    "completeness": "43/64卦有个人策略",
+    "notes": "空白卦位运行时自动用base层兜底。可热插拔：替换此文件即生效，不影响base层",
+    "hot_swappable": true
+  },
+  "hexagrams": [
+    {
+      "num": 1,
+      "name": "乾为天",
+      "personal_strategy": "前期苟着发育，中后期进攻信号，不停开拓进攻",
+      "key_phrase": "你好刚",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 2,
+      "name": "坤为地",
+      "personal_strategy": "以静制动，防守反击，稳住别犯病，对面自己会犯病",
+      "key_phrase": "哇，好多",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 3,
+      "name": "水雷屯",
+      "personal_strategy": "四大凶卦之一，开头难，必须行动才有生机，过程出差错就炸",
+      "key_phrase": "君子报仇十年不晚",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 4,
+      "name": "山水蒙",
+      "personal_strategy": "懵懂无知，需要启蒙，易犯小人被蒙蔽",
+      "key_phrase": "我不知道啊",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 5,
+      "name": "水天需",
+      "personal_strategy": "万事俱备只欠东风，缺时机，需外力点燃，只能等。该吃吃该喝喝",
+      "key_phrase": "云上于天，需君子以饮食宴乐",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 6,
+      "name": "天水讼",
+      "personal_strategy": "事与愿违诸事不顺，与队友意见不一致，宜防陷阱小人",
+      "key_phrase": "你居然和我哔哔",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 7,
+      "name": "地水师",
+      "personal_strategy": "",
+      "key_phrase": "",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 8,
+      "name": "水地比",
+      "personal_strategy": "平顺吉利，贵人相助，速战速决，不当独行侠，成双成对，人到齐则吉",
+      "key_phrase": "兄弟们一起干他",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 9,
+      "name": "风天小畜",
+      "personal_strategy": "时机不成熟，短时间难解决，能力不足。自己有能力创造时机",
+      "key_phrase": "就知道画大饼",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 10,
+      "name": "天泽履",
+      "personal_strategy": "如沼泽中行走，乱挣扎就寄，要提前预想，有心理准备遇事不慌。可有惊无险",
+      "key_phrase": "虚惊一场",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 11,
+      "name": "地天泰",
+      "personal_strategy": "三阳开泰，运势转昌盛，诸事顺利",
+      "key_phrase": "",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 12,
+      "name": "天地否",
+      "personal_strategy": "阴阳不交闭塞不通，百事不顺倒霉开始。凡事宜忍，不忍容易寄掉",
+      "key_phrase": "你要倒霉了",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 13,
+      "name": "天火同人",
+      "personal_strategy": "（低分局）志同道合目标一致则吉",
+      "key_phrase": "这里都是我的人。天与火同人君子以类族辨物",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 14,
+      "name": "火天大有",
+      "personal_strategy": "大吉，天时地利人和，好机遇自己来就看接不接得住，有保底",
+      "key_phrase": "要啥有啥",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 15,
+      "name": "地山谦",
+      "personal_strategy": "",
+      "key_phrase": "",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 16,
+      "name": "雷地豫",
+      "personal_strategy": "",
+      "key_phrase": "",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 17,
+      "name": "泽雷随",
+      "personal_strategy": "",
+      "key_phrase": "",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 18,
+      "name": "山风蛊",
+      "personal_strategy": "",
+      "key_phrase": "",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 19,
+      "name": "地泽临",
+      "personal_strategy": "临利主导，当主角站出来主导，就有贵人或好运相助兜底",
+      "key_phrase": "让我亲自试试",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 20,
+      "name": "风地观",
+      "personal_strategy": "风口浪尖暂不明朗，驻足观察先",
+      "key_phrase": "我看见了",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 21,
+      "name": "火雷噬嗑",
+      "personal_strategy": "诸事阻隔纷争难免，如鲠在喉，需找人帮忙疏通",
+      "key_phrase": "咬牙切齿",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 22,
+      "name": "山火贲",
+      "personal_strategy": "",
+      "key_phrase": "",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 23,
+      "name": "山地剥",
+      "personal_strategy": "大凶，厄运缠身不宜自作聪明，防被女子小人针对。从外到内一层层崩溃，能保住不死就不错。队友发病或情况不对直接卖，只能保有生力量",
+      "key_phrase": "你在剥削我",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 24,
+      "name": "地雷复",
+      "personal_strategy": "",
+      "key_phrase": "",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 25,
+      "name": "天雷无妄",
+      "personal_strategy": "墨守成规按规矩做事则吉，不按规矩必无妄之灾，不要以身犯险，遇事拿最稳妥做法",
+      "key_phrase": "小心被雷劈",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 26,
+      "name": "山天大畜",
+      "personal_strategy": "对手暂时无法战胜给阻碍但阻止不了我们，先忍着忍耐就是吉利",
+      "key_phrase": "有钱人",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 27,
+      "name": "山雷颐",
+      "personal_strategy": "闷声做事当老六",
+      "key_phrase": "",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 28,
+      "name": "泽风大过",
+      "personal_strategy": "",
+      "key_phrase": "",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 29,
+      "name": "坎为水",
+      "personal_strategy": "危机四伏。前面有坑。四大凶卦，坎坷重重无立足之地",
+      "key_phrase": "",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 30,
+      "name": "离为火",
+      "personal_strategy": "开始很烫不要靠近会被烫伤，等凉了再进场收割。局势明朗偏吉，但容易意气用事冲动上头",
+      "key_phrase": "好漂亮",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 31,
+      "name": "泽山咸",
+      "personal_strategy": "君子以虚受人。无心之感吉祥如意，按第一感觉自然而成。配合得当重在配合",
+      "key_phrase": "处个对象呗",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 32,
+      "name": "雷风恒",
+      "personal_strategy": "",
+      "key_phrase": "",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 33,
+      "name": "天山遁",
+      "personal_strategy": "以退为进，后退为推进，不露面拿队友钓鱼",
+      "key_phrase": "兄弟我先走了",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 34,
+      "name": "雷天大壮",
+      "personal_strategy": "",
+      "key_phrase": "",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 35,
+      "name": "火地晋",
+      "personal_strategy": "环境有利于操作上进，需要一定能力",
+      "key_phrase": "上进点",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 36,
+      "name": "地火明夷",
+      "personal_strategy": "天黑了看不清，静待时机切勿盲目行动。小人加害困难重重，忍耐待机",
+      "key_phrase": "遇事不要迷。都在潜水",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 37,
+      "name": "风火家人",
+      "personal_strategy": "",
+      "key_phrase": "",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 38,
+      "name": "火泽睽",
+      "personal_strategy": "",
+      "key_phrase": "",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 39,
+      "name": "水山蹇",
+      "personal_strategy": "四大凶之一，进退两难多灾多难",
+      "key_phrase": "行动不便",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 40,
+      "name": "雷水解",
+      "personal_strategy": "",
+      "key_phrase": "",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 41,
+      "name": "山泽损",
+      "personal_strategy": "为向上或胜利要舍得损失，卖自己或拿资源跟对面换",
+      "key_phrase": "",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 42,
+      "name": "风雷益",
+      "personal_strategy": "气势强风快雷，自信不懦已赢一半。赚得盆满钵满",
+      "key_phrase": "",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 43,
+      "name": "泽天夬",
+      "personal_strategy": "讲究决策效率，打不打要快，决定了贯彻到底越犹豫越凶",
+      "key_phrase": "快点决定走不走",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 44,
+      "name": "天风姤",
+      "personal_strategy": "相遇邂逅不期而遇，多走出去碰运气，有意外之喜也有意外之灾",
+      "key_phrase": "好强大的女人",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 45,
+      "name": "泽地萃",
+      "personal_strategy": "得贵人帮助，出现有利环境滋养你",
+      "key_phrase": "不是一家人不进一家门",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 46,
+      "name": "地风升",
+      "personal_strategy": "步步高升晋升之相，主指自己提升优先考虑自己",
+      "key_phrase": "6的飞起",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 47,
+      "name": "泽水困",
+      "personal_strategy": "",
+      "key_phrase": "",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 48,
+      "name": "水风井",
+      "personal_strategy": "萧规曹随，以不变应万变",
+      "key_phrase": "跑得了和尚跑不了庙",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 49,
+      "name": "泽火革",
+      "personal_strategy": "",
+      "key_phrase": "",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 50,
+      "name": "火风鼎",
+      "personal_strategy": "三人成行鼎足而立，配方正确慢慢做熟，时运是对的只要好好干就向好。革故鼎新",
+      "key_phrase": "生米煮成熟饭",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 51,
+      "name": "震为雷",
+      "personal_strategy": "",
+      "key_phrase": "",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 52,
+      "name": "艮为山",
+      "personal_strategy": "两山重叠障碍重重，过了一关还有一关。不要轻易尝试，越往前路越窄想回头来时路没了。推进阻碍多宜量力而行",
+      "key_phrase": "行了行了就这样",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 53,
+      "name": "风山渐",
+      "personal_strategy": "",
+      "key_phrase": "",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 54,
+      "name": "雷泽归妹",
+      "personal_strategy": "处事走违常理，先得其益后祸害百出",
+      "key_phrase": "快跑，你老婆来了",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 55,
+      "name": "雷火丰",
+      "personal_strategy": "短时间时机很好，顺时而动收获不小。看情况别贪",
+      "key_phrase": "无所畏惧",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 56,
+      "name": "火山旅",
+      "personal_strategy": "带来烦躁，诸事变动不定，不可预测的变动令人烦躁不安",
+      "key_phrase": "开场说走就走的旅行",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 57,
+      "name": "巽为风",
+      "personal_strategy": "顺风可跟进得益，逆风可轻松退出，进退自如来去如风",
+      "key_phrase": "你说得对",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 58,
+      "name": "兑为泽",
+      "personal_strategy": "",
+      "key_phrase": "",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 59,
+      "name": "风水涣",
+      "personal_strategy": "",
+      "key_phrase": "",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 60,
+      "name": "水泽节",
+      "personal_strategy": "会有一定收获但之后要保持节制别贪。水满了再加就溢出",
+      "key_phrase": "克制一点",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 61,
+      "name": "风泽中孚",
+      "personal_strategy": "",
+      "key_phrase": "",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 62,
+      "name": "雷山小过",
+      "personal_strategy": "多劳少得",
+      "key_phrase": "",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 63,
+      "name": "水火既济",
+      "personal_strategy": "事情已成，正常打慢慢来功到自然成，主要思考成了之后的事",
+      "key_phrase": "大功告成",
+      "source": "乐安生个人笔记"
+    },
+    {
+      "num": 64,
+      "name": "火水未济",
+      "personal_strategy": "",
+      "key_phrase": "",
+      "source": "乐安生个人笔记"
+    }
+  ]
+}

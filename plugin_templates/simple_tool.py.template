@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""
+插件模板：简单工具
+调用外部API并格式化返回结果
+"""
+
+import json
+import requests
+
+from plugin_base import ToolPlugin
+
+
+class Plugin(ToolPlugin):
+    PLUGIN_TYPE = "tool"
+    NAME = "{{PLUGIN_NAME}}"
+    DESCRIPTION = "{{PLUGIN_DESC}}"
+    VERSION = "1.0"
+
+    def __init__(self, config=None, core=None):
+        super().__init__(config, core)
+        self._api_url = "{{API_URL}}"
+        self._method = "GET"
+        self._timeout = 10
+
+    def get_tools(self):
+        return [{
+            "name": self.NAME,
+            "description": self.DESCRIPTION,
+            "parameters": {{PARAM_MAP}}
+        }]
+
+    def call_tool(self, tool_name: str, arguments: dict) -> str:
+        """调用工具"""
+        if tool_name != self.NAME:
+            return ""
+
+        try:
+            if self._method == "GET":
+                resp = requests.get(
+                    self._api_url,
+                    params=arguments,
+                    timeout=self._timeout
+                )
+            else:
+                resp = requests.post(
+                    self._api_url,
+                    json=arguments,
+                    timeout=self._timeout
+                )
+
+            data = resp.json()
+            return self._format_result(data)
+
+        except requests.RequestException as e:
+            return f"请求失败: {e}"
+        except (json.JSONDecodeError, KeyError) as e:
+            return f"解析失败: {e}"
+
+    def _format_result(self, data: dict) -> str:
+        """格式化API返回结果"""
+        return f"{{RESULT_FORMAT}}".format(**data)
+
+    def on_user_message(self, message: str) -> str:
+        return message
+
+    def on_post_llm(self, response: str) -> str:
+        return response
+
+    def get_context(self) -> str:
+        return ""

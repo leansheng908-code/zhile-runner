@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+"""
+插件模板：模板回复
+按触发条件生成格式化回复
+"""
+
+from plugin_base import MessagePlugin
+
+
+class Plugin(MessagePlugin):
+    PLUGIN_TYPE = "message"
+    NAME = "{{PLUGIN_NAME}}"
+    DESCRIPTION = "{{PLUGIN_DESC}}"
+    VERSION = "1.0"
+
+    def __init__(self, config=None, core=None):
+        super().__init__(config, core)
+        import re
+        self._triggers = [
+            re.compile(p, re.IGNORECASE) for p in [{{TRIGGER_PATTERNS}}]
+        ]
+        self._replies = [
+            {{REPLY_TEMPLATES}}
+        ]
+
+    def on_user_message(self, message: str) -> str:
+        return message
+
+    def on_post_llm(self, response: str) -> str:
+        return response
+
+    def get_context(self) -> str:
+        return ""
+
+    def try_reply(self, message: str):
+        """尝试匹配并返回回复，不匹配返回None"""
+        for i, pattern in enumerate(self._triggers):
+            if pattern.search(message):
+                reply = self._replies[i] if i < len(self._replies) else self._replies[0]
+                return reply
+        return None
