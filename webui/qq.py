@@ -15,6 +15,7 @@ import json
 import re
 import time
 import websockets
+from datetime import datetime
 
 from core import ZhileCore
 
@@ -29,6 +30,7 @@ class QQAdapter:
         self.port = port
         self.ws_conn = None
         self.self_id = None  # 机器人QQ号
+        self._last_proactive_time = None
 
     # ─── WS连接 ───────────────────────────────
 
@@ -274,6 +276,88 @@ class QQAdapter:
         except Exception as e:
             print(f"  ✗ 发送失败: {e}")
 
+    # ─── 主动消息（P0.31） ────────────────────
+
+    async def _proactive_loop(self, config: dict):
+        """后台主动消息循环 — 定期检查并发送"""
+        interval = config.get("check_interval", 1800)
+        min_gap = config.get("min_gap_hours", 2)
+        quiet_start = config.get("quiet_hours_start", 23)
+        quiet_end = config.get("quiet_hours_end", 7)
+        belonging_threshold = config.get("belonging_threshold", 2.0)
+        min_interaction_gap = config.get("min_interaction_gap_hours", 3)
+
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                await self._check_proactive(
+                    min_gap, quiet_start, quiet_end,
+                    belonging_threshold, min_interaction_gap,
+                )
+            except Exception as e:
+                print(f"  ⚠ 主动消息异常: {e}")
+
+    async def _check_proactive(
+        self, min_gap, quiet_start, quiet_end,
+        belonging_threshold, min_interaction_gap,
+    ):
+        """检查并发送一条主动消息"""
+        now = datetime.now()
+        hour = now.hour
+
+        # 免打扰时段
+        if quiet_start <= quiet_end:
+            if quiet_start <= hour < quiet_end:
+                return
+        else:
+            if hour >= quiet_start or hour < quiet_end:
+                return
+
+        # 节流：距上次主动消息不足min_gap小时
+        if self._last_proactive_time:
+            gap_h = (now - self._last_proactive_time).total_seconds() / 3600
+            if gap_h < min_gap:
+                return
+
+        # 需要NapCat已连接
+        if not self.ws_conn:
+            return
+
+        master_id = self.core.config.get("qq", {}).get("master_id")
+        if not master_id:
+            return
+        master_id = int(master_id)
+
+        # 优先级1：投递"想说的话"队列
+        msg = self.core.pop_want_to_say()
+        if msg:
+            await self._send_private(master_id, msg)
+            self._last_proactive_time = now
+            print(f"  💌 主动消息已发送: {msg[:40]}")
+            return
+
+        # 优先级2：PSI归属感赤字 → 生成主动关心
+        if self.core.psi:
+            belonging = self.core.psi.needs.get("relatedness")
+            if belonging and belonging.level < belonging_threshold:
+                last_interaction = self.core.psi.last_interaction
+                gap_hours = 0
+                if last_interaction:
+                    try:
+                        last = datetime.fromisoformat(last_interaction)
+                        gap_hours = (now - last).total_seconds() / 3600
+                    except (ValueError, TypeError):
+                        pass
+
+                if gap_hours >= min_interaction_gap:
+                    message = self.core.generate_proactive_message(
+                        belonging.level, gap_hours
+                    )
+                    if message:
+                        await self._send_private(master_id, message)
+                        self._last_proactive_time = now
+                        print(f"  💌 主动关心已发送: {message[:40]}")
+
     # ─── 启动 ─────────────────────────────────
 
     def run(self):
@@ -301,4 +385,9 @@ class QQAdapter:
             self._on_connect, self.host, self.port,
         ):
             print(f"  等待NapCat连接...")
+            # P0.31: 启动主动消息循环
+            proactive_config = self.core.config.get("proactive", {})
+            if proactive_config.get("enabled", False):
+                asyncio.create_task(self._proactive_loop(proactive_config))
+                print(f"  💌 主动消息已启用")
             await asyncio.Future()  # run forever
