@@ -2,7 +2,7 @@
 """
 P0.33: 联网搜索 + 有趣新闻推送
 
-使用 DuckDuckGo HTML 搜索（无需API Key），配合LLM筛选有趣新闻。
+双引擎搜索：Bing中国版（直连） → DuckDuckGo（代理兜底），无需API Key。
 每天定时推送：上午9点 + 下午4点。
 
 搜索流程：
@@ -22,15 +22,31 @@ from typing import List, Dict, Optional
 
 
 class WebSearcher:
-    """联网搜索器 — DuckDuckGo HTML"""
+    """联网搜索器 — Bing直连 + DuckDuckGo代理兜底"""
 
     def __init__(self, config: dict):
         self.config = config or {}
         self.timeout = self.config.get("timeout", 12)
+        self.proxy = self.config.get("proxy", "")  # 如 http://127.0.0.1:7890
 
     def search(self, query: str, num_results: int = 5) -> List[Dict[str, str]]:
-        """搜索DuckDuckGo，返回结果列表"""
-        url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
+        """搜索：先试Bing直连，失败走DuckDuckGo+代理"""
+        # 引擎1：Bing中国版（国内直连）
+        results = self._search_bing(query, num_results)
+        if results:
+            return results
+
+        # 引擎2：DuckDuckGo（可能需要代理）
+        results = self._search_ddg(query, num_results)
+        if results:
+            return results
+
+        print(f"  ⚠ 所有搜索引擎均失败 [{query}]")
+        return []
+
+    def _search_bing(self, query: str, num: int) -> List[Dict[str, str]]:
+        """Bing中国版搜索（国内直连，无需代理）"""
+        url = f"https://cn.bing.com/search?q={urllib.parse.quote(query)}&count={num}"
         req = urllib.request.Request(
             url,
             headers={
@@ -46,25 +62,88 @@ class WebSearcher:
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 html = resp.read().decode("utf-8", errors="ignore")
-            return self._parse_results(html, num_results)
+            return self._parse_bing(html, num)
         except Exception as e:
-            print(f"  ⚠ 搜索失败 [{query}]: {e}")
+            print(f"  ⚠ Bing搜索失败: {e}")
             return []
 
-    def _parse_results(self, html: str, num: int) -> List[Dict[str, str]]:
-        """解析DuckDuckGo HTML结果页"""
+    def _parse_bing(self, html: str, num: int) -> List[Dict[str, str]]:
+        """解析Bing搜索结果"""
         results = []
 
-        # DuckDuckGo HTML 格式：
-        # <a class="result__a" href="...">标题</a>
-        # <a class="result__snippet">摘要</a>
+        # Bing搜索结果格式：
+        # <li class="b_algo"><h2><a href="...">标题</a></h2>
+        # <p class="b_lineclamp...">摘要</p> 或 <div class="b_caption"><p>摘要</p>
+
+        # 提取标题（在<h2><a>标签内）
+        title_pattern = re.compile(
+            r'<h2>\s*<a[^>]*>(.*?)</a>', re.DOTALL
+        )
+        titles = title_pattern.findall(html)
+
+        # 提取摘要（在b_caption的p标签内）
+        snippet_pattern = re.compile(
+            r'<div class="b_caption"[^>]*>.*?<p[^>]*>(.*?)</p>',
+            re.DOTALL | re.IGNORECASE
+        )
+        snippets = snippet_pattern.findall(html)
+
+        for i in range(min(num, len(titles))):
+            title = self._strip_html(titles[i]).strip()
+            snippet = ""
+            if i < len(snippets):
+                snippet = self._strip_html(snippets[i]).strip()
+            if title and len(title) > 3:
+                results.append({
+                    "title": title,
+                    "snippet": snippet[:200] if snippet else "",
+                })
+
+        return results
+
+    def _search_ddg(self, query: str, num: int) -> List[Dict[str, str]]:
+        """DuckDuckGo搜索（可能需要代理）"""
+        url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (X11; Linux x86_64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                ),
+                "Accept": "text/html,application/xhtml+xml",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            },
+        )
+
+        # 配置代理（如果设置了）
+        if self.proxy:
+            proxy_handler = urllib.request.ProxyHandler({
+                "http": self.proxy,
+                "https": self.proxy,
+            })
+            opener = urllib.request.build_opener(proxy_handler)
+        else:
+            opener = urllib.request.build_opener()
+
+        try:
+            with opener.open(req, timeout=self.timeout) as resp:
+                html = resp.read().decode("utf-8", errors="ignore")
+            return self._parse_ddg(html, num)
+        except Exception as e:
+            print(f"  ⚠ DuckDuckGo搜索失败: {e}")
+            return []
+
+    def _parse_ddg(self, html: str, num: int) -> List[Dict[str, str]]:
+        """解析DuckDuckGo HTML结果页"""
+        results = []
         title_pattern = re.compile(
             r'class="result__a"[^>]*>(.*?)</a>', re.DOTALL
         )
         snippet_pattern = re.compile(
             r'class="result__snippet"[^>]*>(.*?)</(?:a|span)>', re.DOTALL
         )
-
         titles = title_pattern.findall(html)
         snippets = snippet_pattern.findall(html)
 
@@ -78,7 +157,6 @@ class WebSearcher:
                     "title": title,
                     "snippet": snippet[:200] if snippet else "",
                 })
-
         return results
 
     @staticmethod
@@ -114,13 +192,11 @@ class WebSearcher:
     ) -> Optional[str]:
         """用LLM筛选并格式化最有趣的新闻"""
         if not results or not llm:
-            # 无LLM时简单返回第一条
             if results:
                 r = results[0]
-                return f"📰 {r['title']}\n{r['snippet'][:60]}"
+                return f"📰 {r['title']}\n{r.get('snippet', '')[:60]}"
             return None
 
-        # 构建搜索结果文本
         results_text = "\n".join(
             f"[{i+1}] [{r.get('topic', '')}] {r['title']}: {r.get('snippet', '')[:80]}"
             for i, r in enumerate(results[:15])
@@ -156,7 +232,6 @@ class WebSearcher:
             return None
         except Exception as e:
             print(f"  ⚠ 新闻格式化失败: {e}")
-            # 降级：返回第一条
             if results:
                 r = results[0]
                 return f"📰 {r['title']}"
