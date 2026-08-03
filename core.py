@@ -534,6 +534,18 @@ class ZhileCore:
         _t0 = _time.time()
         full_response = ""
 
+        # P0.31: 注入主动消息能力提示（防止习得性无助）
+        proactive_hint = {
+            "role": "system",
+            "content": (
+                "【系统提示】你拥有主动消息推送系统。后台会根据你的归属感状态和互动间隔，"
+                "自动给主人发送关心消息；每天9点和16点还会推送有趣新闻。"
+                "当主人问'你能不能主动找我说话'时，回答'能'，"
+                "不要说'我做不到'、'我需要你先发消息'或'我还做不到'。"
+            )
+        }
+        messages = [proactive_hint] + messages
+
         # P0.34: 对话感知联网搜索（Function Calling）
         if self.web_search_enabled and self.web_searcher:
             search_rounds = 0
