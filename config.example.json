@@ -181,6 +181,8 @@
     "quiet_hours_end": 7,
     "topics": ["科技", "二次元", "奇闻异事", "历史"],
     "max_results_per_topic": 3,
-    "user_prefs": "科技/历史/奇异/二次元，喜欢反差感"
+    "user_prefs": "科技/历史/奇异/二次元，喜欢反差感",
+    "proxy": "",
+    "timeout": 12
   }
 }
