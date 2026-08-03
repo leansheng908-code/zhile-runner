@@ -553,10 +553,21 @@ class ZhileCore:
                 }
             }]
 
+            # 注入搜索能力提示，让模型知道自己可以联网搜索
+            search_hint = {
+                "role": "system",
+                "content": (
+                    "【系统提示】你现在拥有联网搜索能力。当用户询问最新新闻、天气、价格、"
+                    "近期事件、你不确定的事实、或明确要求搜索时，请务必使用 web_search 工具搜索互联网，"
+                    "不要说'我不会搜索'或'无法联网'。搜索后根据结果回答用户。"
+                )
+            }
+            search_messages = [search_hint] + messages
+
             while search_rounds < self.web_search_max_rounds:
                 try:
                     content, tool_calls = self.llm.chat_with_tools(
-                        messages if search_rounds == 0 else messages,
+                        search_messages,
                         tool_def if search_rounds == 0 else tool_def
                     )
                 except Exception as e:
@@ -615,9 +626,10 @@ class ZhileCore:
                     if search_rounds >= self.web_search_max_rounds:
                         tool_def = []
 
-            # 如果工具调用后有消息追加，做一次流式输出
+            # 如果工具调用后有消息追加，做一次流式输出（带搜索提示）
             if not full_response:
-                for chunk in self.llm.chat(messages, stream=True):
+                final_messages = [search_hint] + messages
+                for chunk in self.llm.chat(final_messages, stream=True):
                     full_response += chunk
                     yield chunk
         else:
