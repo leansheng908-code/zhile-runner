@@ -165,5 +165,22 @@
     "quiet_hours_end": 7,
     "belonging_threshold": 2.0,
     "min_interaction_gap_hours": 3
+  },
+  "care_hooks": {
+    "enabled": true,
+    "llm_extract_enabled": true,
+    "llm_extract_interval": 5,
+    "max_hooks": 20,
+    "custom_rules": []
+  },
+  "news_push": {
+    "enabled": true,
+    "push_times": [9, 16],
+    "check_interval": 600,
+    "quiet_hours_start": 23,
+    "quiet_hours_end": 7,
+    "topics": ["科技", "二次元", "奇闻异事", "历史"],
+    "max_results_per_topic": 3,
+    "user_prefs": "科技/历史/奇异/二次元，喜欢反差感"
   }
 }
