@@ -45,6 +45,9 @@ from self_roadmap import SelfRoadmap
 from code_executor import CodeExecutor
 from debug_loop import DebugLoop
 
+# P0.47: 瞬时感知层 — 一期一会
+from fleeting_moment import FleetingMoment
+
 # P0.32: 对话感知关心钩子
 from care_hooks import CareHookManager
 # P0.33: 联网搜索 + 新闻推送
@@ -436,6 +439,14 @@ class ZhileCore:
         bgp_config = self.config.get("background_plugins", {})
         self.bg_plugin_manager = BgPluginManager(config=bgp_config) if bgp_config.get("enabled", True) else None
 
+        # P0.47: 瞬时感知层 — 一期一会（不持久化任何系统状态）
+        fm_config = self.config.get("fleeting_moment", {})
+        self.fleeting_moment = FleetingMoment(
+            diary_path=fm_config.get("diary_path", "data/perception_diary.md"),
+            resonance_threshold=fm_config.get("resonance_threshold", 1.0),
+            diary_threshold=fm_config.get("diary_threshold", 1.5),
+        ) if fm_config.get("enabled", True) else None
+
     @staticmethod
     def _load_config(config_path: str) -> dict:
         path = Path(config_path)
@@ -581,6 +592,17 @@ class ZhileCore:
                 self.ctx.set_memory_context(relevant)
                 if self.observer:
                     self.observer.record_memory(relevant)
+
+        # P0.47: 瞬时感知·一期一会 — 记忆共振产生一次性感受，注入后即弃
+        if self.fleeting_moment:
+            try:
+                if use_resonance and relevant:
+                    hex_info = self._hex_state.get("current", {}) if self._hex_state else None
+                    fm_result = self.fleeting_moment.generate(relevant, hexagram_info=hex_info)
+                    if fm_result:
+                        self.ctx.set_fleeting_moment(fm_result['descriptor'])
+            except (NameError, Exception):
+                pass  # 瞬时感知失败不影响对话
 
         # P0.29: 编译知识页检索（零token，追加到记忆上下文）
         if self.memory_compiler:
@@ -766,6 +788,10 @@ class ZhileCore:
             self.ctx.add_assistant_message(full_response)
             if self.psi:
                 self.psi.on_assistant_response(full_response)
+
+        # P0.47: 瞬时感知消散——一期一会，只存在于这一次
+        if self.fleeting_moment:
+            self.ctx.clear_fleeting_moment()
 
         # P0.28: 遗忘测试调度 — 每轮对话后驱动状态机
         if self.forget_test_scheduler:
