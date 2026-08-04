@@ -287,5 +287,11 @@
   "background_plugins": {
     "enabled": true,
     "dir": "plugins"
+  },
+  "fleeting_moment": {
+    "enabled": true,
+    "resonance_threshold": 1.0,
+    "diary_threshold": 1.5,
+    "diary_path": "data/perception_diary.md"
   }
 }
