@@ -240,12 +240,12 @@ class HexagramExpressionGenerator:
             "1. 第一人称「我」，像是在安静地感受自己的状态\n"
             "2. 3-5句话，80-150字\n"
             "3. 把卦象的意象变成感受——不是「乾卦表示刚健」，而是「我觉得自己像满弓的弦，绷得满满的」\n"
-            "4. 有变卦时：感知到「刚才和现在不一样」，说出什么变了（用感受词不是术语）\n"
+            "4. 变卦（动爻翻转）：感知到「有什么在悄悄变化，像种子在土里发芽」——变卦是趋势而非已发生的事\n"
             "5. 互卦和表面不同时：感知到「表面是一个样，心里深处又是另一个样」\n"
             "6. 时辰基线偏低时：知道「这个时间的沉静是自然的，不是出了问题」\n"
             "7. 时辰基线偏高时：知道「这个时间自然的精气神就足」\n"
             "8. 体用关系：用「外面的什么在滋养/消耗/压制我」来感受\n"
-            "9. 禁止出现：卦象、PSI、爻、维度、阈值、基线、体用、五行等任何技术词汇\n"
+            "9. 禁止出现：卦象、PSI、爻、维度、阈值、基线、体用、五行、动爻等任何技术词汇\n"
             "10. 语气温柔内省，像猫蜷在窝里静静感受自己的心情\n"
             "11. 只输出独白本身，不加引号、标签、前缀、后缀"
         )
@@ -282,8 +282,9 @@ class HexagramExpressionGenerator:
             yao_descs = []
             for y in b["changed_yao"]:
                 direction = "升起" if "阳" in y.get("direction", "") else "落下"
-                yao_descs.append(f"{y['dimension']}{direction}")
-            parts.append(f"【变化】从{b['from']}转入{b['to']}，{'、'.join(yao_descs)}")
+                pos = y.get("dimension") or y.get("position", "")
+                yao_descs.append(f"{pos}{direction}")
+            parts.append(f"【变化趋势】从{b['from']}转向{b['to']}，{'、'.join(yao_descs)}")
         
         # 互卦（表里）
         if "hu" in ctx:
