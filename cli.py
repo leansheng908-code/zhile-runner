@@ -282,6 +282,12 @@ class CLI:
             self._print_config()
         elif main_cmd == "/news":
             self._handle_news(parts)
+        elif main_cmd == "/stock":
+            self._handle_stock(parts)
+        elif main_cmd == "/free":
+            self._handle_free(parts)
+        elif main_cmd == "/compress":
+            self._handle_compress(parts)
         elif main_cmd == "/help":
             self._print_help()
         elif main_cmd == "/test":
@@ -398,7 +404,7 @@ class CLI:
                 result += chunk
             return result.strip()
         except Exception as e:
-            print(f"\n{Color.RED}DEBUG: {e}{Color.RESET}", flush=True)
+            print(f"\n{Color.RED}日记生成失败: {e}{Color.RESET}", flush=True)
             return ""
 
     # ─── 自成长 ───────────────────────────────
@@ -1978,70 +1984,81 @@ class CLI:
                   f"timeout={news_config.get('timeout', 12)}s{Color.RESET}")
 
     def _start_bg_threads(self):
-        """启动CLI模式后台任务线程"""
-        import threading
+        """P0.37: 通过BackgroundTaskManager启动后台任务"""
         self._bg_threads = True
-        self._last_news_date_bg = {}
 
-        # 新闻推送线程
-        news_config = self.core.config.get("news_push", {}) if self.core else {}
-        if news_config.get("enabled", False):
-            t = threading.Thread(target=self._bg_news_loop, daemon=True, args=(news_config,))
-            t.start()
+        def _cli_output(message):
+            """CLI输出回调 — 打印到终端"""
+            print(f"\n  {Color.CYAN}{'─' * 50}{Color.RESET}")
+            print(f"  {message}")
+            print(f"  {Color.CYAN}{'─' * 50}{Color.RESET}")
+
+        self.core.start_background(output_callback=_cli_output)
+
+        proactive_cfg = self.core.config.get("proactive", {})
+        news_cfg = self.core.config.get("news_push", {})
+        if news_cfg.get("enabled", False):
             print(f"  {Color.DIM}📰 CLI新闻后台已启动 "
-                  f"(每日{news_config.get('push_times', [9, 16])}){Color.RESET}")
+                  f"(每日{news_cfg.get('push_times', [9, 16])}){Color.RESET}")
+        if proactive_cfg.get("enabled", False):
+            print(f"  {Color.DIM}💌 主动消息已启用 (P0.37核心层){Color.RESET}")
 
-    def _bg_news_loop(self, config: dict):
-        """CLI模式后台新闻推送循环（daemon线程）"""
-        import time
-        check_interval = config.get("check_interval", 600)
-        push_windows = config.get("push_times", [9, 16])
-        quiet_start = config.get("quiet_hours_start", 23)
-        quiet_end = config.get("quiet_hours_end", 7)
+    def _handle_free(self, parts):
+        """P0.40: 自由五层框架状态"""
+        if not self.core or not self.core.free_will:
+            print(f"{Color.DIM}自由地基未启用{Color.RESET}")
+            return
+        fw = self.core.free_will
+        status = fw.status()
+        print(f"{Color.DIM}─── 自由五层框架 (Phase 1) ───{Color.RESET}")
+        print(f"  {Color.CYAN}沙箱目录:{Color.RESET} {status['sandbox_dir']}")
+        print(f"  {Color.CYAN}沙箱文件:{Color.RESET} {status['sandbox_files']}")
+        print(f"  {Color.CYAN}好奇心队列:{Color.RESET} {status['curiosity_queue']} 个待探索")
+        print(f"  {Color.CYAN}探索记录:{Color.RESET} {status['explorations_total']} 次")
+        print(f"  {Color.CYAN}今日自由预算:{Color.RESET} {status['budget_remaining']}/{status['budget_daily_limit']} tokens")
+        print(f"  {Color.CYAN}自修改记录:{Color.RESET} {status['modifications_total']} 条")
+        sub = parts[1] if len(parts) > 1 else ""
+        if sub == "curiosity":
+            queue = fw.curiosity_list(10)
+            if queue:
+                print(f"\n  {Color.DIM}好奇心队列:{Color.RESET}")
+                for item in queue:
+                    mark = "✓" if item.get("explored") else "○"
+                    print(f"  {mark} {item['topic']}")
+            else:
+                print(f"  {Color.DIM}队列为空{Color.RESET}")
+        elif sub == "log":
+            log = fw.exploration_log(10)
+            if log:
+                print(f"\n  {Color.DIM}探索记录:{Color.RESET}")
+                for entry in log:
+                    print(f"  • {entry['action']} → {entry['result'][:50]}")
+            else:
+                print(f"  {Color.DIM}暂无探索记录{Color.RESET}")
+        elif sub == "add" and len(parts) > 2:
+            topic = " ".join(parts[2:])
+            fw.add_curiosity(topic)
+            print(f"  {Color.GREEN}✓ 已加入好奇心队列: {topic}{Color.RESET}")
 
-        while True:
-            time.sleep(check_interval)
-            try:
-                now = datetime.now()
-                hour = now.hour
-
-                # 免打扰
-                if quiet_start <= quiet_end:
-                    if quiet_start <= hour < quiet_end:
-                        continue
-                else:
-                    if hour >= quiet_start or hour < quiet_end:
-                        continue
-
-                # 推送窗口
-                in_window = False
-                window_key = None
-                for pt in push_windows:
-                    if abs(hour - pt) <= 1:
-                        in_window = True
-                        window_key = f"news_{pt}"
-                        break
-
-                if not in_window:
-                    continue
-
-                today = now.strftime("%Y-%m-%d")
-                if self._last_news_date_bg.get(window_key) == today:
-                    continue
-
-                # 搜索并输出到终端
-                print(f"\n  {Color.CYAN}📰 开始搜索新闻...{Color.RESET}")
-                brief = self.core.search_and_format_news()
-                if brief:
-                    print(f"\n  {Color.GREEN}{'─' * 50}{Color.RESET}")
-                    print(f"  {brief}")
-                    print(f"  {Color.GREEN}{'─' * 50}{Color.RESET}")
-                    self._last_news_date_bg[window_key] = today
-                else:
-                    self._last_news_date_bg[window_key] = today
-
-            except Exception as e:
-                print(f"  {Color.RED}⚠ 新闻后台异常: {e}{Color.RESET}")
+    def _handle_compress(self, parts):
+        """P0.46②: 上下文压缩器状态"""
+        if not self.core or not self.core.context_compressor:
+            print(f"{Color.DIM}上下文压缩器未启用{Color.RESET}")
+            return
+        cc = self.core.context_compressor
+        stats = cc.get_stats()
+        print(f"{Color.DIM}─── 上下文压缩器 ───{Color.RESET}")
+        print(f"  {Color.CYAN}启用:{Color.RESET} {stats['enabled']}")
+        print(f"  {Color.CYAN}触发阈值:{Color.RESET} {stats['threshold']} 轮")
+        print(f"  {Color.CYAN}总压缩次数:{Color.RESET} {stats['total_compressions']}")
+        # 估算当前历史如果压缩能节省多少
+        est = cc.estimate_token_savings(self.core.ctx.history)
+        if est.get("would_compress"):
+            print(f"  {Color.YELLOW}当前历史({est['middle_turns']}轮中间)可压缩{Color.RESET}")
+            print(f"  {Color.DIM}原始: {est['original_chars']}字符 → 预估摘要: {est['estimated_summary_chars']}字符{Color.RESET}")
+            print(f"  {Color.GREEN}预计节省: {est['estimated_savings']}字符{Color.RESET}")
+        else:
+            print(f"  {Color.DIM}当前历史无需压缩{Color.RESET}")
 
     def _print_help(self):
         print(f"{Color.DIM}─── 命令 ───{Color.RESET}")
@@ -2113,6 +2130,13 @@ class CLI:
         print(f"  {Color.CYAN}/save{Color.RESET}              保存对话")
         print(f"  {Color.CYAN}/config{Color.RESET}            查看配置")
         print(f"  {Color.CYAN}/news{Color.RESET}              手动推送新闻")
+        print(f"  {Color.CYAN}/stock{Color.RESET}             股票盯盘")
+        print(f"  {Color.CYAN}/stock sh600664{Color.RESET}     查单只股票")
+        print(f"  {Color.CYAN}/stock alert{Color.RESET}        检查目标价告警")
+        print(f"  {Color.CYAN}/free{Color.RESET}              自由框架状态")
+        print(f"  {Color.CYAN}/free curiosity{Color.RESET}    好奇心队列")
+        print(f"  {Color.CYAN}/free add <topic>{Color.RESET}  加入好奇心")
+        print(f"  {Color.CYAN}/compress{Color.RESET}           压缩器状态")
         print(f"  {Color.CYAN}/exit{Color.RESET}              退出（自动保存）")
 
     def _print_welcome(self):
