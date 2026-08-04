@@ -459,14 +459,29 @@ class QQAdapter:
             self._on_connect, self.host, self.port,
         ):
             print(f"  等待NapCat连接...")
-            # P0.31: 启动主动消息循环
-            proactive_config = self.core.config.get("proactive", {})
-            if proactive_config.get("enabled", False):
-                asyncio.create_task(self._proactive_loop(proactive_config))
-                print(f"  💌 主动消息已启用")
-            # P0.33: 启动新闻推送循环
-            news_config = self.core.config.get("news_push", {})
-            if news_config.get("enabled", False):
-                asyncio.create_task(self._news_loop(news_config))
-                print(f"  📰 新闻推送已启用 (每日{news_config.get('push_times', [9, 16])})")
+            # P0.37: 后台任务统一由BackgroundTaskManager管理
+            self._event_loop = asyncio.get_event_loop()
+
+            def _bg_output(message):
+                """后台任务输出回调 — 桥接线程→asyncio"""
+                master_id = self.core.config.get("qq", {}).get("master_id")
+                if not master_id or not self.ws_conn:
+                    return
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        self._send_private(int(master_id), message),
+                        self._event_loop,
+                    )
+                except Exception as e:
+                    print(f"  ⚠ 后台消息桥接失败: {e}")
+
+            self.core.start_background(output_callback=_bg_output)
+
+            proactive_cfg = self.core.config.get("proactive", {})
+            news_cfg = self.core.config.get("news_push", {})
+            if proactive_cfg.get("enabled", False):
+                print(f"  💌 主动消息已启用 (P0.37核心层)")
+            if news_cfg.get("enabled", False):
+                print(f"  📰 新闻推送已启用 (每日{news_cfg.get('push_times', [9, 16])})")
+
             await asyncio.Future()  # run forever
