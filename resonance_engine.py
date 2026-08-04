@@ -749,18 +749,35 @@ class ResonanceEngine:
                 snapshot[sys_name] = compact
         return snapshot
 
-    @staticmethod
-    def generate_snapshot(year: int, month: int, day: int, hour: int = 12,
-                          minute: int = 0, gender: str = "male") -> Dict[str, Any]:
+    # ── 类级快照缓存 ──
+    _cache_raw: Optional[Dict[str, Any]] = None
+    _cache_key: tuple = ()
+    _cache_time: float = 0.0
+
+    @classmethod
+    def generate_snapshot(cls, year: int, month: int, day: int, hour: int = 12,
+                          minute: int = 0, gender: str = "male",
+                          cache_ttl: int = 300) -> Dict[str, Any]:
         """生成当前时间点的共振快照（直接调用各系统模块）
 
         参数：
             year/month/day/hour/minute: 时间戳
             gender: 性别（部分系统需要）
+            cache_ttl: 缓存有效期（秒），默认300秒（5分钟）。
+                       大多数术数系统标签变化粒度≥小时，5分钟缓存几乎零精度损失。
 
         返回：
             dict: {system_name: raw_labels_dict} 适合共振计算和存储
         """
+        import time as _time
+
+        # ── 缓存命中检查 ──
+        cache_key = (year, month, day, hour, minute, gender)
+        now_ts = _time.time()
+        if (cls._cache_raw is not None
+                and cls._cache_key == cache_key
+                and (now_ts - cls._cache_time) < cache_ttl):
+            return cls._cache_raw
         import sys as _sys
         import os as _os
         from datetime import datetime as _dt
@@ -803,6 +820,11 @@ class ResonanceEngine:
                     raw_labels[sys_name] = func(year, month, day, hour)
             except Exception:
                 pass  # 跳过失败的系统
+
+        # ── 写入缓存 ──
+        cls._cache_raw = raw_labels
+        cls._cache_key = cache_key
+        cls._cache_time = _time.time()
 
         return raw_labels
 
