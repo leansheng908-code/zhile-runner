@@ -49,6 +49,15 @@ from debug_loop import DebugLoop
 from care_hooks import CareHookManager
 # P0.33: 联网搜索 + 新闻推送
 from web_searcher import WebSearcher
+# P0.37: 通道无关后台任务管理器
+from background_manager import BackgroundTaskManager
+
+# P0.39: 主动记忆重建引擎
+from active_reconstruction import ActiveReconstructor
+# P0.46②: 上下文压缩器
+from context_compressor import ContextCompressor
+# P0.40 Phase 1: 自由五层框架地基
+from free_will import FreeWillFoundation
 
 # P0.24: 易经认知编码系统
 import sys as _sys, os as _os
@@ -107,6 +116,12 @@ class ZhileCore:
         memory_context = self.memory.get_memory_context(
             max_memories=mem_config.get("max_inject", 15)
         )
+
+        # ─── P0.39: 主动记忆重建引擎 ─────────
+        ar_config = self.config.get("active_reconstruction", {})
+        self.active_reconstructor = ActiveReconstructor(
+            llm_provider=self.llm,
+        ) if ar_config.get("enabled", True) else None
 
         # ─── PSI ──────────────────────────────
         psi_config = self.config.get("psi", {})
@@ -378,6 +393,19 @@ class ZhileCore:
         self.web_search_max_rounds = ws_config.get("max_rounds", 3)
         self.web_search_num_results = ws_config.get("num_results", 5)
 
+        # P0.37: 通道无关后台任务管理器
+        self.background = BackgroundTaskManager(self)
+
+        # P0.46②: 上下文压缩器
+        cc_config = self.config.get("context_compressor", {})
+        self.context_compressor = ContextCompressor(
+            llm_provider=self.llm, config=cc_config
+        ) if cc_config.get("enabled", True) else None
+
+        # P0.40 Phase 1: 自由五层框架地基
+        fw_config = self.config.get("free_will", {})
+        self.free_will = FreeWillFoundation(config=fw_config)
+
     @staticmethod
     def _load_config(config_path: str) -> dict:
         path = Path(config_path)
@@ -460,9 +488,23 @@ class ZhileCore:
                         pass
                 return
 
+        # P0.39: 主动记忆重建 — 复杂问题走重建，简单问题走被动检索
+        _ar_handled = False
+        if (self.active_reconstructor
+                and self.active_reconstructor.is_complex_query(message)):
+            try:
+                _ar_result = self.active_reconstructor.reconstruct(
+                    message, self.memory, self.llm)
+                self.ctx.set_memory_context(_ar_result)
+                if self.observer:
+                    self.observer.record_memory(_ar_result)
+                _ar_handled = True
+            except Exception:
+                pass  # 回退到被动检索
+
         # P0.8/P0.25/P0.42: 动态记忆检索 — 多策略共振版
         mem_config = self.config.get("memory", {})
-        if mem_config.get("dynamic_retrieval", True):
+        if not _ar_handled and mem_config.get("dynamic_retrieval", True):
             # P0.42: 优先使用多策略共振检索
             use_resonance = mem_config.get("use_resonance_engine", True)
             current_snapshot = None
@@ -546,6 +588,12 @@ class ZhileCore:
 
         self.ctx.add_user_message(message)
         messages = self.ctx.get_messages()
+
+        # P0.46②: 上下文压缩 — 对话过长时自动摘要中间部分
+        if self.context_compressor:
+            messages, compressed = self.context_compressor.compress(messages)
+            if compressed:
+                self.ctx.load_history(messages)
 
         # P0.4: 插件 LLM前钩子
         if self.plugin_manager:
@@ -762,6 +810,16 @@ class ZhileCore:
         if not self.cognitive_router:
             return {"enabled": False}
         return self.cognitive_router.get_stats()
+
+    def start_background(self, output_callback=None):
+        """P0.37: 启动后台任务管理器，可传入输出回调"""
+        if output_callback:
+            self.background.register_output(output_callback)
+        self.background.start()
+
+    def background_status(self) -> dict:
+        """P0.37: 后台任务状态"""
+        return self.background.status()
 
     def get_status(self) -> dict:
         ctx_stats = self.ctx.get_stats()
