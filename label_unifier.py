@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 标签统一接口层 (Label Unifier)
-将12个术数系统的不同输出格式统一为标准格式，不改原有脚本。
+将13个术数系统的不同输出格式统一为标准格式，不改原有脚本。
 
 统一输出格式:
 {
@@ -51,6 +51,7 @@ _SYSTEM_CONFIGS = [
     {"id": "canmou",    "name": "参考系统",     "dir": "canmou",    "module": "canmou_label_dictionary",    "func": "generate_canmou_labels",         "dims": 111},
     {"id": "jyotish",   "name": "印度占星",     "dir": "jyotish",   "module": "jyotish_label_dictionary",   "func": "generate_labels_from_timestamp", "dims": 55},
     {"id": "tarot",     "name": "塔罗牌阵",     "dir": "tarot",     "module": "tarot_label_dictionary",     "func": "generate_labels_from_timestamp", "dims": 55},
+    {"id": "economic_cycle", "name": "经济周期", "dir": "economic_cycle", "module": "economic_cycle_label_dictionary", "func": "generate_labels_from_timestamp", "dims": 22},
 ]
 
 
@@ -171,12 +172,13 @@ _NORMALIZERS = {
     "canmou": _normalize_canmou,
     "jyotish": _normalize_layers_system,
     "tarot": _normalize_layers_system,
+    "economic_cycle": _normalize_layers_system,
 }
 
 
 def generate_unified_labels(dt: datetime = None) -> dict:
     """
-    生成所有12个系统的统一标签。
+    生成所有13个系统的统一标签。
     
     参数:
         dt: datetime对象，默认当前时间
