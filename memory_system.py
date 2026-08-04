@@ -58,7 +58,8 @@ class Memory:
                  last_triggered: str = None, trigger_count: int = 0,
                  dimension: str = "recent", entity_ids: List[str] = None,
                  memory_id: str = None,
-                 hexagram_binary: str = None, hu_binary: str = None):
+                 hexagram_binary: str = None, hu_binary: str = None,
+                 label_snapshot: dict = None):
         self.content = content
         self.category = category
         self.importance = max(1, min(10, importance))
@@ -71,6 +72,8 @@ class Memory:
         # P0.25: 卦象情绪标签
         self.hexagram_binary = hexagram_binary  # 存入时的卦象6位编码
         self.hu_binary = hu_binary  # 存入时的互卦6位编码
+        # P0.42: 多策略共振快照（13系统精简标签向量）
+        self.label_snapshot = label_snapshot  # {system_name: {key: value}}
 
     @staticmethod
     def _make_id(content: str, created_at: str) -> str:
@@ -90,6 +93,7 @@ class Memory:
             "entity_ids": self.entity_ids,
             "hexagram_binary": self.hexagram_binary,
             "hu_binary": self.hu_binary,
+            "label_snapshot": self.label_snapshot,
         }
 
     @classmethod
@@ -104,6 +108,7 @@ class Memory:
             memory_id=d.get("id"),
             hexagram_binary=d.get("hexagram_binary"),
             hu_binary=d.get("hu_binary"),
+            label_snapshot=d.get("label_snapshot"),
         )
 
     def should_archive(self) -> bool:
@@ -290,7 +295,8 @@ class MemorySystem:
                    importance: int = 5, dimension: str = "recent",
                    entity_ids: List[str] = None,
                    hexagram_binary: str = None,
-                   hu_binary: str = None) -> bool:
+                   hu_binary: str = None,
+                   label_snapshot: dict = None) -> bool:
         """添加一条记忆，已存在则更新触发"""
         content = content.strip()
         if not content:
@@ -311,7 +317,8 @@ class MemorySystem:
         mem = Memory(content, category, importance, dimension=dimension,
                      entity_ids=entity_ids,
                      hexagram_binary=hexagram_binary,
-                     hu_binary=hu_binary)
+                     hu_binary=hu_binary,
+                     label_snapshot=label_snapshot)
         self.memories.append(mem)
         self._save_memories()
 
@@ -479,11 +486,74 @@ class MemorySystem:
 
         return self._format_memory_list(top)
 
-    # ─── LLM自动提取 ──────────────────────────
+    def get_relevant_memories_with_resonance(
+        self, user_message: str, current_snapshot: dict = None,
+        max_memories: int = 15
+    ) -> str:
+        """P0.42: 多策略共振加权记忆检索
+
+        使用13系统多策略共振引擎替代旧版卦象单一加权。
+        三层排序：
+        1. 实体匹配（内容关联）— 最高优先级
+        2. 多策略共振（13系统加权）— 共振分高的记忆更可能相关
+        3. 优先级排序（重要性+衰减）— 兜底
+
+        参数：
+        - current_snapshot: ResonanceEngine.generate_snapshot() 或
+                           ResonanceEngine.extract_compact_snapshot() 的返回值
+        """
+        active = [m for m in self.memories if not m.should_archive()]
+        if not active:
+            return ""
+
+        # 实体匹配
+        entity_linked = []
+        remaining = []
+        if self.entity_graph:
+            entity_ids, related_memory_ids = self.entity_graph.process_extraction(
+                user_message)
+            for m in active:
+                if m.id in related_memory_ids or set(m.entity_ids) & set(entity_ids):
+                    entity_linked.append(m)
+                else:
+                    remaining.append(m)
+        else:
+            remaining = list(active)
+
+        # 多策略共振加权
+        if current_snapshot:
+            try:
+                from resonance_engine import ResonanceEngine
+                engine = ResonanceEngine()
+                for m in remaining:
+                    if m.label_snapshot:
+                        res_score = engine.calculate(current_snapshot, m.label_snapshot)
+                    else:
+                        res_score = 1.0  # 无快照的记忆用中性分
+                    m._resonance_boost = m.priority() * res_score
+                remaining.sort(
+                    key=lambda m: getattr(m, '_resonance_boost', m.priority()),
+                    reverse=True)
+            except Exception:
+                remaining.sort(key=lambda m: m.priority(), reverse=True)
+        else:
+            remaining.sort(key=lambda m: m.priority(), reverse=True)
+
+        combined = entity_linked + remaining
+        top = combined[:max_memories]
+
+        now = datetime.now().isoformat()
+        for m in top:
+            m.trigger_count += 1
+            m.last_triggered = now
+        self._save_memories()
+
+        return self._format_memory_list(top)
 
     def extract_from_conversation(self, history: List[Dict],
                                    hexagram_binary: str = None,
-                                   hu_binary: str = None) -> int:
+                                   hu_binary: str = None,
+                                   label_snapshot: dict = None) -> int:
         """对话结束后，用LLM提取值得记住的信息+实体
         P0.25: 存入时打卦象情绪标签
         """
@@ -555,6 +625,7 @@ class MemorySystem:
                     entity_ids=entity_ids,
                     hexagram_binary=hexagram_binary,
                     hu_binary=hu_binary,
+                    label_snapshot=label_snapshot,
                 ):
                     count += 1
                     # 记录新记忆ID用于实体关联
