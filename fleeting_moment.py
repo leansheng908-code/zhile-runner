@@ -197,9 +197,11 @@ class FleetingMoment:
             max_score = 0.0
             top_content = None
             for item in resonance_results:
-                # 尝试多种分数字段
+                # 尝试多种分数字段（优先原始共振分）
                 item_score = 0.0
-                if hasattr(item, "score"):
+                if hasattr(item, "_resonance_raw"):
+                    item_score = float(item._resonance_raw)
+                elif hasattr(item, "score"):
                     item_score = float(item.score)
                 elif hasattr(item, "_resonance_boost"):
                     item_score = float(item._resonance_boost)
