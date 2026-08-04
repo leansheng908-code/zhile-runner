@@ -101,16 +101,51 @@ class CLI:
                 observer.record_hexagram(
                     self.core._hex_state, self.core.hexagram_expression)
 
-        # P0.8: 动态记忆检索 — 根据用户消息召回相关记忆
+        # P0.8/P0.42: 动态记忆检索 — 多策略共振版（与core.py统一）
         mem_config = self.config.get("memory", {})
         if mem_config.get("dynamic_retrieval", True) and self.memory:
-            relevant = self.memory.get_relevant_memories(
-                user_input,
-                max_memories=mem_config.get("max_inject", 15),
-            )
-            self.ctx.set_memory_context(relevant)
-            if observer:
-                observer.record_memory(relevant)
+            use_resonance = mem_config.get("use_resonance_engine", True)
+            if use_resonance:
+                try:
+                    from resonance_engine import ResonanceEngine
+                    from datetime import datetime as _dt
+                    _engine = ResonanceEngine()
+                    _now = _dt.now()
+                    _snapshot = _engine.extract_compact_snapshot(
+                        _engine.generate_snapshot(_now.year, _now.month, _now.day, _now.hour, _now.minute)
+                    )
+                    relevant = self.memory.get_relevant_memories_with_resonance(
+                        user_input,
+                        current_snapshot=_snapshot,
+                        max_memories=mem_config.get("max_inject", 15),
+                    )
+                    self.ctx.set_memory_context(relevant)
+                    if observer:
+                        observer.record_memory(relevant)
+                except Exception:
+                    use_resonance = False  # 回退到旧版
+
+            if not use_resonance:
+                relevant = self.memory.get_relevant_memories(
+                    user_input,
+                    max_memories=mem_config.get("max_inject", 15),
+                )
+                self.ctx.set_memory_context(relevant)
+                if observer:
+                    observer.record_memory(relevant)
+
+            # P0.47: 瞬时感知·一期一会 — 记忆共振产生一次性感受，注入后即弃
+            if self.core and self.core.fleeting_moment:
+                try:
+                    if use_resonance and relevant:
+                        hex_info = (self.core._hex_state.get("current", {})
+                                    if self.core._hex_state else None)
+                        fm_result = self.core.fleeting_moment.generate(
+                            relevant, hexagram_info=hex_info)
+                        if fm_result:
+                            self.ctx.set_fleeting_moment(fm_result['descriptor'])
+                except (NameError, Exception):
+                    pass  # 瞬时感知失败不影响对话
 
         # P0.9: 记录弧光+体细胞+prompt
         if observer:
@@ -151,6 +186,9 @@ class CLI:
                 # 自动记忆提取
                 if self.core:
                     self.core.maybe_auto_extract()
+                # P0.47: 瞬时感知消散——一期一会，只存在于这一次
+                if self.core and self.core.fleeting_moment:
+                    self.ctx.clear_fleeting_moment()
                 return
 
         messages = self.ctx.get_messages()
@@ -171,6 +209,10 @@ class CLI:
                     self.psi.on_assistant_response(full_response)
             else:
                 print(f"{Color.DIM}（空回复）{Color.RESET}")
+
+            # P0.47: 瞬时感知消散——一期一会，只存在于这一次
+            if self.core and self.core.fleeting_moment:
+                self.ctx.clear_fleeting_moment()
 
             # P0.23: LLM路径标记 + 情景库录入
             route_label = "llm_fallback"
@@ -210,6 +252,9 @@ class CLI:
 
         except Exception as e:
             print(f"\n{Color.RED}⚠ {e}{Color.RESET}")
+            # P0.47: 异常时也要清空瞬时感知
+            if self.core and self.core.fleeting_moment:
+                self.ctx.clear_fleeting_moment()
 
     def _handle_command(self, cmd: str):
         parts = cmd.lower().strip().split(maxsplit=2)
