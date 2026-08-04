@@ -38,6 +38,52 @@ MULTI_HOP_SIGNALS = [
     "之前问", "提到过", "说过", "聊到",
 ]
 
+# P0.39 Phase 2: 时序信号词 — 时间相关的问题需要时序重建
+TEMPORAL_SIGNALS = [
+    "之前", "上次", "那天", "还记得", "什么时候",
+    "前几天", "昨天", "上周", "上个月", "当时",
+]
+
+# P0.39 Phase 2: 跨主题信号词 — 需要对比不同主题的记忆
+CROSS_TOPIC_SIGNALS = [
+    "相比", "不同", "区别", "变化", "之前vs现在",
+    "对比", "差异", "转变", "另一个", "另外",
+]
+
+# P0.39 Phase 2: 推理信号词 — 需要链式推理检索
+REASONING_SIGNALS = [
+    "为什么", "怎么会", "如果", "假设",
+    "推理", "因为", "所以", "导致", "原因",
+]
+
+
+class ComplexityResult(dict):
+    """复杂度分析结果
+
+    兼容 bool 上下文：可直接用于 ``if`` 判断，也可通过属性/键访问详细信息。
+
+    属性:
+        is_complex: 是否需要主动重建
+        complexity_score: 复杂度评分 (0-10)
+        signal_type: 信号类型
+            ``"multi_hop" | "temporal" | "cross_topic" | "reasoning" | "none"``
+    """
+
+    def __bool__(self) -> bool:
+        return self.get("is_complex", False)
+
+    @property
+    def is_complex(self) -> bool:
+        return self.get("is_complex", False)
+
+    @property
+    def complexity_score(self) -> int:
+        return self.get("complexity_score", 0)
+
+    @property
+    def signal_type(self) -> str:
+        return self.get("signal_type", "none")
+
 
 class ActiveReconstructor:
     """主动记忆重建引擎
@@ -52,18 +98,74 @@ class ActiveReconstructor:
     # ─── 复杂度判断 ─────────────────────────────
 
     @staticmethod
-    def is_complex_query(query: str) -> bool:
+    def is_complex_query(query: str) -> ComplexityResult:
         """判断问题是否需要主动重建（多跳/复杂问题）
 
-        简单问题（单跳）走被动检索：
-        - query长度 < 20 且不含多跳信号词 → 简单
-        - 否则 → 复杂，需要主动重建
+        P0.39 Phase 2 增强：在原有 24 个多跳信号词基础上，新增
+        - 时序信号词 (之前/上次/那天/还记得/什么时候)
+        - 跨主题信号词 (相比/不同/区别/变化/之前vs现在)
+        - 推理信号词 (为什么/怎么会/如果/假设)
+
+        返回 :class:`ComplexityResult`，兼容旧版 ``bool`` 用法::
+
+            if ActiveReconstructor.is_complex_query(query):  # 仍然可用
+                ...
+            result = ActiveReconstructor.is_complex_query(query)
+            print(result.complexity_score, result.signal_type)
+
+        返回:
+            ComplexityResult: {is_complex, complexity_score, signal_type}
         """
         if not query or not query.strip():
-            return False
-        if len(query) < 20 and not any(sig in query for sig in MULTI_HOP_SIGNALS):
-            return False
-        return True
+            return ComplexityResult(
+                is_complex=False, complexity_score=0, signal_type="none")
+
+        score = 0
+        signal_type = "none"
+
+        # 1. 多跳信号词（原有 24 个）
+        multi_hop_hits = sum(1 for sig in MULTI_HOP_SIGNALS if sig in query)
+        if multi_hop_hits > 0:
+            score += min(multi_hop_hits * 2, 4)
+            signal_type = "multi_hop"
+
+        # 2. 时序信号词（新增）
+        temporal_hits = sum(1 for sig in TEMPORAL_SIGNALS if sig in query)
+        if temporal_hits > 0:
+            score += min(temporal_hits * 2, 4)
+            if signal_type == "none":
+                signal_type = "temporal"
+
+        # 3. 跨主题信号词（新增）
+        cross_topic_hits = sum(1 for sig in CROSS_TOPIC_SIGNALS if sig in query)
+        if cross_topic_hits > 0:
+            score += min(cross_topic_hits * 2, 4)
+            if signal_type == "none":
+                signal_type = "cross_topic"
+
+        # 4. 推理信号词（新增）
+        reasoning_hits = sum(1 for sig in REASONING_SIGNALS if sig in query)
+        if reasoning_hits > 0:
+            score += min(reasoning_hits * 2, 4)
+            if signal_type == "none":
+                signal_type = "reasoning"
+
+        # 5. 长度加分
+        if len(query) >= 20:
+            score += 1
+        if len(query) >= 50:
+            score += 1
+
+        # 阈值 = 1：保持向后兼容
+        #   旧逻辑: len>=20 → True (score=1 ✓) | 有信号词 → True (score>=2 ✓)
+        #   旧逻辑: len<20 且无信号 → False (score=0 ✓)
+        is_complex = score >= 1
+
+        return ComplexityResult(
+            is_complex=is_complex,
+            complexity_score=score,
+            signal_type=signal_type,
+        )
 
     # ─── LLM调用封装 ─────────────────────────────
 
@@ -388,3 +490,406 @@ class ActiveReconstructor:
         memory_system._save_memories()
 
         return memory_system._format_memory_list(top)
+
+    # ─── P0.39 Phase 2: 多步重建策略 ──────────────
+
+    def reconstruct_with_strategy(
+        self, query: str, memory_system, strategy: str = "auto",
+        llm_provider=None, max_rounds: int = 5
+    ) -> str:
+        """根据复杂度类型选择策略进行记忆重建
+
+        P0.39 Phase 2: 在标准重建流程之上，根据问题类型选择
+        不同的重建策略，使检索结果更贴合问题意图。
+
+        参数:
+            query: 用户问题
+            memory_system: 记忆系统实例
+            strategy: 策略类型
+
+                - ``"auto"`` — 自动判断复杂度类型（默认）
+                - ``"temporal"`` — 时序策略，按时间线组织
+                - ``"cross_topic"`` — 跨主题策略，对比不同主题
+                - ``"reasoning"`` — 推理策略，链式检索
+                - ``"default"`` — 标准重建流程
+
+            llm_provider: LLM 提供者（可选）
+            max_rounds: 最大重建轮次
+
+        返回:
+            格式化的记忆上下文字符串
+        """
+        if llm_provider:
+            self.llm = llm_provider
+
+        # auto 模式：自动判断复杂度类型
+        if strategy == "auto":
+            result = self.is_complex_query(query)
+            if not result["is_complex"]:
+                return memory_system._format_memories(15)
+            strategy = result["signal_type"]
+            if strategy in ("none", "multi_hop"):
+                strategy = "default"
+
+        if strategy == "temporal":
+            return self._reconstruct_temporal(
+                query, memory_system, llm_provider, max_rounds)
+        elif strategy == "cross_topic":
+            return self._reconstruct_cross_topic(
+                query, memory_system, llm_provider, max_rounds)
+        elif strategy == "reasoning":
+            return self._reconstruct_reasoning(
+                query, memory_system, llm_provider, max_rounds)
+        else:
+            return self.reconstruct(
+                query, memory_system, llm_provider, max_rounds)
+
+    def _reconstruct_temporal(
+        self, query: str, memory_system, llm_provider=None,
+        max_rounds: int = 5
+    ) -> str:
+        """时序策略：按时间线组织检索结果
+
+        适用于含时序信号词的问题（之前/上次/那天/还记得/什么时候）。
+        先执行标准 Cue-Tag-Content 检索，再按记忆创建时间排序，
+        构建从旧到新的时间线视图。
+
+        参数:
+            query: 用户问题
+            memory_system: 记忆系统实例
+            llm_provider: LLM 提供者
+            max_rounds: 最大重建轮次
+
+        返回:
+            时间线格式的记忆上下文字符串
+        """
+        if llm_provider:
+            self.llm = llm_provider
+
+        # 提取初始 Cue
+        cues = self._extract_cues(query) if self.llm else \
+            self._fallback_cue_extraction(query)
+        if not cues:
+            cues = self._fallback_cue_extraction(query)
+
+        # 激活 Tag → 选择 → 检索 Content
+        candidate_tags = self._activate_tags(cues, memory_system)
+        selected_tags = self._select_tags(cues, candidate_tags)
+        evidence = self._retrieve_content(
+            selected_tags, memory_system) if selected_tags else []
+
+        # 补充：直接用 Cue 匹配内容
+        cue_set = set(c.lower() for c in cues)
+        for mem in memory_system.memories:
+            if mem.should_archive() or mem in evidence:
+                continue
+            content_lower = mem.content.lower()
+            if any(cue in content_lower for cue in cue_set):
+                evidence.append(mem)
+
+        if not evidence:
+            return memory_system._format_memories(15)
+
+        # 按时间线排序（旧 → 新）
+        evidence.sort(key=lambda m: m.created_at)
+        top = evidence[:15]
+
+        # 触发记录
+        now = datetime.now().isoformat()
+        for m in top:
+            m.trigger_count += 1
+            m.last_triggered = now
+        memory_system._save_memories()
+
+        return self._format_timeline(top)
+
+    def _reconstruct_cross_topic(
+        self, query: str, memory_system, llm_provider=None,
+        max_rounds: int = 5
+    ) -> str:
+        """跨主题策略：对比检索不同主题的记忆
+
+        适用于含跨主题信号词的问题（相比/不同/区别/变化/之前vs现在）。
+        先执行标准检索，再按主题（tags 或 dimension）分组，
+        组织为多主题对比视图。
+
+        参数:
+            query: 用户问题
+            memory_system: 记忆系统实例
+            llm_provider: LLM 提供者
+            max_rounds: 最大重建轮次
+
+        返回:
+            跨主题对比格式的记忆上下文字符串
+        """
+        if llm_provider:
+            self.llm = llm_provider
+
+        # 提取 Cue
+        cues = self._extract_cues(query) if self.llm else \
+            self._fallback_cue_extraction(query)
+        if not cues:
+            cues = self._fallback_cue_extraction(query)
+
+        # 激活 Tag → 选择 → 检索
+        candidate_tags = self._activate_tags(cues, memory_system)
+        selected_tags = self._select_tags(cues, candidate_tags)
+        evidence = self._retrieve_content(
+            selected_tags, memory_system) if selected_tags else []
+
+        # 补充：直接用 Cue 匹配
+        cue_set = set(c.lower() for c in cues)
+        for mem in memory_system.memories:
+            if mem.should_archive() or mem in evidence:
+                continue
+            content_lower = mem.content.lower()
+            if any(cue in content_lower for cue in cue_set):
+                evidence.append(mem)
+
+        if not evidence:
+            return memory_system._format_memories(15)
+
+        # 按主题分组：优先使用 tags，回退到 dimension
+        by_topic: Dict[str, list] = {}
+        for mem in evidence:
+            topics = mem.tags if mem.tags else [mem.dimension]
+            for topic in topics:
+                by_topic.setdefault(topic, []).append(mem)
+
+        # 主题太少时用 dimension 补充分组
+        if len(by_topic) < 2:
+            by_topic = {}
+            for mem in evidence:
+                by_topic.setdefault(mem.dimension, []).append(mem)
+
+        top = evidence[:15]
+
+        # 触发记录
+        now = datetime.now().isoformat()
+        for m in top:
+            m.trigger_count += 1
+            m.last_triggered = now
+        memory_system._save_memories()
+
+        return self._format_cross_topic(by_topic, top)
+
+    def _reconstruct_reasoning(
+        self, query: str, memory_system, llm_provider=None,
+        max_rounds: int = 5
+    ) -> str:
+        """推理策略：链式检索，每步基于上一步结果
+
+        适用于含推理信号词的问题（为什么/怎么会/如果/假设）。
+        迭代式检索，每轮从上一步的证据中提取新 Cue，构建推理链。
+        与标准重建的区别：更强调推理深度，记录每步的检索路径。
+
+        参数:
+            query: 用户问题
+            memory_system: 记忆系统实例
+            llm_provider: LLM 提供者
+            max_rounds: 最大重建轮次
+
+        返回:
+            推理链格式的记忆上下文字符串
+        """
+        if llm_provider:
+            self.llm = llm_provider
+
+        # 无 LLM 或记忆太少 → 退化到标准重建
+        if not self.llm or len(memory_system.memories) < 3:
+            return self.reconstruct(
+                query, memory_system, llm_provider, max_rounds)
+
+        collected: list = []
+        collected_ids: Set[str] = set()
+        reasoning_chain: List[Dict] = []
+
+        # 初始 Cue
+        cues = self._extract_cues(query)
+        if not cues:
+            cues = self._fallback_cue_extraction(query)
+
+        reasoning_chain.append(
+            {"step": 1, "cues": list(cues), "found": 0})
+
+        for round_num in range(max_rounds):
+            # 激活 Tag
+            candidate_tags = self._activate_tags(cues, memory_system)
+            if not candidate_tags:
+                # 直接用 Cue 匹配内容
+                for mem in memory_system.memories:
+                    if mem.id in collected_ids or mem.should_archive():
+                        continue
+                    content_lower = mem.content.lower()
+                    if any(cue.lower() in content_lower for cue in cues):
+                        collected.append(mem)
+                        collected_ids.add(mem.id)
+                reasoning_chain[-1]["found"] = len(collected)
+                break
+
+            selected_tags = self._select_tags(cues, candidate_tags)
+            if not selected_tags:
+                break
+
+            new_evidence = self._retrieve_content(
+                selected_tags, memory_system, exclude_ids=collected_ids)
+            if not new_evidence:
+                break
+
+            for mem in new_evidence:
+                collected.append(mem)
+                collected_ids.add(mem.id)
+
+            reasoning_chain[-1]["found"] = len(new_evidence)
+
+            # 推理策略：判断是否需要继续链式检索
+            sufficient, new_cues = self._judge_sufficiency(
+                query, collected)
+
+            if sufficient:
+                break
+
+            if new_cues:
+                new_unique = [c for c in new_cues if c not in cues]
+                if not new_unique:
+                    break
+                cues = new_unique
+                reasoning_chain.append(
+                    {"step": round_num + 2, "cues": list(cues), "found": 0})
+            else:
+                break
+
+        if not collected:
+            return self.reconstruct(
+                query, memory_system, llm_provider, max_rounds)
+
+        # 按优先级排序
+        collected.sort(key=lambda m: m.priority(), reverse=True)
+        top = collected[:15]
+
+        # 触发记录
+        now = datetime.now().isoformat()
+        for m in top:
+            m.trigger_count += 1
+            m.last_triggered = now
+        memory_system._save_memories()
+
+        return self._format_reasoning(top, reasoning_chain)
+
+    # ─── P0.39 Phase 2: 格式化辅助 ──────────────
+
+    @staticmethod
+    def _format_timeline(memories: list) -> str:
+        """将记忆按时间线格式化（旧 → 新）"""
+        if not memories:
+            return ""
+        parts = ["【时间线记忆重建】"]
+        for m in memories:
+            try:
+                dt = datetime.fromisoformat(m.created_at)
+                date_str = dt.strftime("%Y-%m-%d %H:%M")
+            except (ValueError, TypeError):
+                date_str = m.created_at[:16] if m.created_at else "未知时间"
+            parts.append(f"  [{date_str}] {m.content}")
+        return "\n".join(parts)
+
+    @staticmethod
+    def _format_cross_topic(by_topic: Dict[str, list],
+                            all_memories: list) -> str:
+        """将记忆按主题对比格式化"""
+        if not all_memories:
+            return ""
+        parts = ["【跨主题记忆对比】"]
+        grouped_ids: Set[str] = set()
+        for topic, memories in by_topic.items():
+            parts.append(f"  ◆ 主题: {topic}")
+            for m in memories[:5]:
+                parts.append(f"    - {m.content}")
+                grouped_ids.add(m.id)
+        # 补充未分组记忆
+        ungrouped = [m for m in all_memories if m.id not in grouped_ids]
+        if ungrouped:
+            parts.append("  ◆ 其他")
+            for m in ungrouped[:5]:
+                parts.append(f"    - {m.content}")
+        return "\n".join(parts)
+
+    @staticmethod
+    def _format_reasoning(memories: list,
+                          chain: List[Dict]) -> str:
+        """将记忆按推理链格式化"""
+        if not memories:
+            return ""
+        parts = ["【推理链记忆重建】"]
+        if len(chain) > 1:
+            parts.append(f"  推理深度: {len(chain)} 步")
+            for step in chain:
+                cues_str = ", ".join(step["cues"][:3])
+                parts.append(
+                    f"    步骤{step['step']}: 检索词=[{cues_str}] → "
+                    f"找到 {step['found']} 条")
+        parts.append("  相关记忆:")
+        for m in memories:
+            parts.append(f"    - {m.content}")
+        return "\n".join(parts)
+
+    # ─── P0.39 Phase 2: 重建质量评估 ──────────────
+
+    def evaluate_reconstruction(self, query: str, result: str) -> dict:
+        """评估重建结果质量
+
+        对重建结果进行无 LLM 的启发式评估，计算覆盖度、置信度，
+        并识别可能缺失的方面。
+
+        参数:
+            query: 用户问题
+            result: 重建结果文本（reconstruct 等方法的返回值）
+
+        返回:
+            ``{coverage: float, confidence: float, missing_aspects: list}``
+
+            - **coverage** (0.0~1.0): query 关键词在结果中出现的比例
+            - **confidence** (0.0~1.0): 基于结果长度和记忆条数的置信度
+            - **missing_aspects**: 缺失方面列表（空列表表示无缺失）
+        """
+        if not result or not result.strip():
+            return {
+                "coverage": 0.0,
+                "confidence": 0.0,
+                "missing_aspects": ["无结果"],
+            }
+
+        # 提取 query 关键词
+        query_cues = self._fallback_cue_extraction(query)
+        if not query_cues:
+            query_cues = [query.strip()[:5]] if query.strip() else []
+
+        # 覆盖度：query 关键词在结果中出现的比例
+        result_lower = result.lower()
+        matched = sum(1 for cue in query_cues
+                      if cue.lower() in result_lower)
+        coverage = matched / len(query_cues) if query_cues else 0.0
+
+        # 置信度：基于结果长度和记忆条数
+        memory_count = result.count("- [") + result.count("    - ") + \
+            result.count("  - [")
+        length_factor = min(len(result) / 500.0, 1.0)  # 500 字符为满分
+        count_factor = min(memory_count / 5.0, 1.0)    # 5 条记忆为满分
+        confidence = length_factor * 0.4 + count_factor * 0.6
+
+        # 识别缺失方面
+        missing_aspects: List[str] = []
+        if coverage < 0.3:
+            missing_aspects.append("关键词覆盖不足")
+        if memory_count < 2:
+            missing_aspects.append("相关记忆数量不足")
+        if len(result) < 100:
+            missing_aspects.append("结果内容过短")
+        if coverage < 0.5 and confidence < 0.5:
+            missing_aspects.append("可能需要补充检索")
+
+        return {
+            "coverage": round(coverage, 3),
+            "confidence": round(confidence, 3),
+            "missing_aspects": missing_aspects,
+        }
