@@ -259,5 +259,9 @@
     "sandbox_dir": "sandbox",
     "budget_ratio": 0.2,
     "idle_threshold": 30
+  },
+  "active_reconstruction": {
+    "enabled": true,
+    "max_rounds": 5
   }
 }
