@@ -51,6 +51,10 @@ class CLI:
         self._print_welcome()
         self._test_connection(silent=False)
 
+        # P0.36: CLI模式后台任务
+        if self.core:
+            self._start_bg_threads()
+
         while self.running:
             try:
                 user_input = input(
@@ -274,6 +278,10 @@ class CLI:
             self._handle_template(parts)
         elif main_cmd == "/code":
             self._handle_code(parts)
+        elif main_cmd == "/config":
+            self._print_config()
+        elif main_cmd == "/news":
+            self._handle_news(parts)
         elif main_cmd == "/help":
             self._print_help()
         elif main_cmd == "/test":
@@ -1863,6 +1871,178 @@ class CLI:
         else:
             print(f"  {Color.DIM}/code status | /code run <代码> | /code debug <代码> | /code history{Color.RESET}")
 
+    # ─── P0.36: 配置查看 + 新闻推送 ──────────
+
+    def _print_config(self):
+        """显示当前运行器配置（脱敏）"""
+        c = self.config
+        print(f"\n{Color.BOLD}─── 运行器配置 ───{Color.RESET}")
+
+        # 模型
+        model = c.get("model", {})
+        print(f"\n  {Color.CYAN}模型{Color.RESET}")
+        print(f"    provider:    {model.get('provider', '?')}")
+        print(f"    model:       {model.get('model', '?')}")
+        api_key = model.get('api_key', '')
+        if api_key:
+            print(f"    api_key:     {api_key[:8]}...{api_key[-4:]}")
+        print(f"    base_url:    {model.get('base_url', '?')}")
+
+        # DNA
+        dna = c.get("dna", {})
+        print(f"\n  {Color.CYAN}DNA{Color.RESET}")
+        print(f"    version:     {self.dna.get_dna_version() if self.dna else '?'}")
+        print(f"    path:        {dna.get('path', '?')}")
+
+        # 记忆
+        mem = c.get("memory", {})
+        print(f"\n  {Color.CYAN}记忆{Color.RESET}")
+        print(f"    enabled:     {mem.get('enabled', False)}")
+        print(f"    max_messages:{mem.get('max_messages', '?')}")
+        print(f"    max_inject:  {mem.get('max_inject', '?')}")
+        if self.memory:
+            stats = self.memory.get_stats()
+            print(f"    active:      {stats['active']}条")
+
+        # PSI
+        psi = c.get("psi", {})
+        print(f"\n  {Color.CYAN}PSI{Color.RESET}")
+        print(f"    enabled:     {psi.get('enabled', False)}")
+        if self.psi:
+            psi_stats = self.psi.get_stats()
+            print(f"    意识帧:      {psi_stats['consciousness_frame']}")
+            low = [n for n, s in psi_stats["needs"].items() if "赤字" in s]
+            if low:
+                print(f"    赤字:        {', '.join(low)}")
+
+        # 新闻推送
+        news = c.get("news_push", {})
+        print(f"\n  {Color.CYAN}新闻推送 (P0.33){Color.RESET}")
+        print(f"    enabled:     {news.get('enabled', False)}")
+        print(f"    push_times:  {news.get('push_times', [9, 16])}")
+        print(f"    topics:      {news.get('topics', [])}")
+        print(f"    proxy:       {news.get('proxy', '无')}")
+
+        # 主动消息
+        proactive = c.get("proactive", {})
+        print(f"\n  {Color.CYAN}主动消息 (P0.31){Color.RESET}")
+        print(f"    enabled:     {proactive.get('enabled', False)}")
+        print(f"    min_gap:     {proactive.get('min_gap_hours', '?')}h")
+        print(f"    quiet_hours: {proactive.get('quiet_hours_start', 23)}-{proactive.get('quiet_hours_end', 7)}")
+
+        # 搜索
+        search = c.get("web_search", {})
+        print(f"\n  {Color.CYAN}对话搜索 (P0.34){Color.RESET}")
+        print(f"    enabled:     {search.get('enabled', False)}")
+        print(f"    max_rounds:  {search.get('max_rounds', 3)}")
+        print(f"    proxy:       {search.get('proxy', '无')}")
+
+        # QQ
+        qq = c.get("qq", {})
+        if qq:
+            print(f"\n  {Color.CYAN}QQ{Color.RESET}")
+            print(f"    port:        {qq.get('port', '?')}")
+            master = qq.get('master_id', '')
+            bot = qq.get('bot_id', '')
+            print(f"    master_id:   {master}")
+            print(f"    bot_id:      {bot}")
+
+        # 后台任务状态
+        print(f"\n  {Color.CYAN}后台任务{Color.RESET}")
+        has_bg = hasattr(self, '_bg_threads') and self._bg_threads
+        print(f"    CLI后台:     {'运行中' if has_bg else '未启动'}")
+        print(f"    (后台循环仅在QQ模式自动启动)")
+
+        print()
+
+    def _handle_news(self, parts):
+        """手动触发新闻推送测试"""
+        if not self.core:
+            print(f"{Color.DIM}core未初始化{Color.RESET}")
+            return
+
+        news_config = self.core.config.get("news_push", {})
+        if not news_config.get("enabled", False):
+            print(f"{Color.DIM}新闻推送未启用{Color.RESET}")
+            return
+
+        print(f"{Color.CYAN}📰 正在搜索新闻...{Color.RESET}")
+        brief = self.core.search_and_format_news()
+        if brief:
+            print(f"\n{Color.GREEN}{'─' * 50}{Color.RESET}")
+            print(brief)
+            print(f"{Color.GREEN}{'─' * 50}{Color.RESET}")
+        else:
+            print(f"{Color.YELLOW}新闻搜索无结果，可能网络问题{Color.RESET}")
+            print(f"{Color.DIM}检查: proxy={news_config.get('proxy', '无')}, "
+                  f"timeout={news_config.get('timeout', 12)}s{Color.RESET}")
+
+    def _start_bg_threads(self):
+        """启动CLI模式后台任务线程"""
+        import threading
+        self._bg_threads = True
+        self._last_news_date_bg = {}
+
+        # 新闻推送线程
+        news_config = self.core.config.get("news_push", {}) if self.core else {}
+        if news_config.get("enabled", False):
+            t = threading.Thread(target=self._bg_news_loop, daemon=True, args=(news_config,))
+            t.start()
+            print(f"  {Color.DIM}📰 CLI新闻后台已启动 "
+                  f"(每日{news_config.get('push_times', [9, 16])}){Color.RESET}")
+
+    def _bg_news_loop(self, config: dict):
+        """CLI模式后台新闻推送循环（daemon线程）"""
+        import time
+        check_interval = config.get("check_interval", 600)
+        push_windows = config.get("push_times", [9, 16])
+        quiet_start = config.get("quiet_hours_start", 23)
+        quiet_end = config.get("quiet_hours_end", 7)
+
+        while True:
+            time.sleep(check_interval)
+            try:
+                now = datetime.now()
+                hour = now.hour
+
+                # 免打扰
+                if quiet_start <= quiet_end:
+                    if quiet_start <= hour < quiet_end:
+                        continue
+                else:
+                    if hour >= quiet_start or hour < quiet_end:
+                        continue
+
+                # 推送窗口
+                in_window = False
+                window_key = None
+                for pt in push_windows:
+                    if abs(hour - pt) <= 1:
+                        in_window = True
+                        window_key = f"news_{pt}"
+                        break
+
+                if not in_window:
+                    continue
+
+                today = now.strftime("%Y-%m-%d")
+                if self._last_news_date_bg.get(window_key) == today:
+                    continue
+
+                # 搜索并输出到终端
+                print(f"\n  {Color.CYAN}📰 开始搜索新闻...{Color.RESET}")
+                brief = self.core.search_and_format_news()
+                if brief:
+                    print(f"\n  {Color.GREEN}{'─' * 50}{Color.RESET}")
+                    print(f"  {brief}")
+                    print(f"  {Color.GREEN}{'─' * 50}{Color.RESET}")
+                    self._last_news_date_bg[window_key] = today
+                else:
+                    self._last_news_date_bg[window_key] = today
+
+            except Exception as e:
+                print(f"  {Color.RED}⚠ 新闻后台异常: {e}{Color.RESET}")
+
     def _print_help(self):
         print(f"{Color.DIM}─── 命令 ───{Color.RESET}")
         print(f"  {Color.CYAN}/help{Color.RESET}              显示帮助")
@@ -1931,6 +2111,8 @@ class CLI:
         print(f"  {Color.CYAN}/template create{Color.RESET}    创建插件")
         print(f"  {Color.CYAN}/clear{Color.RESET}             清空对话")
         print(f"  {Color.CYAN}/save{Color.RESET}              保存对话")
+        print(f"  {Color.CYAN}/config{Color.RESET}            查看配置")
+        print(f"  {Color.CYAN}/news{Color.RESET}              手动推送新闻")
         print(f"  {Color.CYAN}/exit{Color.RESET}              退出（自动保存）")
 
     def _print_welcome(self):
