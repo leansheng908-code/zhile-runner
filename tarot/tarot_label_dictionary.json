@@ -1,0 +1,2020 @@
+{
+  "system": "tarot",
+  "system_name": "塔罗牌阵",
+  "system_name_en": "Tarot Card Spread",
+  "version": "1.0",
+  "description": "韦特塔罗78张完整牌组，三牌阵(过去/现在/未来)抽牌系统",
+  "total_cards": 78,
+  "major_arcana_count": 22,
+  "minor_arcana_count": 56,
+  "suits": {
+    "wands": {
+      "name_cn": "权杖",
+      "name_en": "Wands",
+      "element": "火",
+      "wuxing": "木",
+      "direction": "南",
+      "domain": "行动/激情/创造/意志"
+    },
+    "cups": {
+      "name_cn": "圣杯",
+      "name_en": "Cups",
+      "element": "水",
+      "wuxing": "水",
+      "direction": "西",
+      "domain": "情感/关系/直觉/心灵"
+    },
+    "swords": {
+      "name_cn": "宝剑",
+      "name_en": "Swords",
+      "element": "风",
+      "wuxing": "金",
+      "direction": "东",
+      "domain": "思维/冲突/决断/理性"
+    },
+    "pentacles": {
+      "name_cn": "星币",
+      "name_en": "Pentacles",
+      "element": "土",
+      "wuxing": "土",
+      "direction": "北",
+      "domain": "物质/财富/现实/稳定"
+    }
+  },
+  "major_arcana": [
+    {
+      "num": 0,
+      "name": "愚者",
+      "name_en": "The Fool",
+      "element": "风",
+      "keywords": "新的开始/冒险/纯真/自由",
+      "upright_keywords": [
+        "自由",
+        "新旅程",
+        "无限可能",
+        "纯真",
+        "冒险精神"
+      ],
+      "reversed_keywords": [
+        "鲁莽",
+        "不稳定",
+        "愚蠢",
+        "缺乏计划",
+        "冒失行动"
+      ],
+      "archetypes": "天真者/探索者/自由灵魂",
+      "wuxing_mapping": "金",
+      "gua_mapping": "地雷复"
+    },
+    {
+      "num": 1,
+      "name": "魔术师",
+      "name_en": "The Magician",
+      "element": "风",
+      "keywords": "创造/意志力/技巧/沟通",
+      "upright_keywords": [
+        "创造力",
+        "意志力",
+        "技能精通",
+        "沟通",
+        "显化"
+      ],
+      "reversed_keywords": [
+        "操纵",
+        "滥用才能",
+        "欺骗",
+        "未发挥潜力",
+        "拖延"
+      ],
+      "archetypes": "法师/创造者/沟通者",
+      "wuxing_mapping": "金",
+      "gua_mapping": "乾为天"
+    },
+    {
+      "num": 2,
+      "name": "女祭司",
+      "name_en": "The High Priestess",
+      "element": "水",
+      "keywords": "直觉/潜意识/神秘/智慧",
+      "upright_keywords": [
+        "内在智慧",
+        "直觉",
+        "静默",
+        "神秘",
+        "潜意识"
+      ],
+      "reversed_keywords": [
+        "隐秘",
+        "压抑直觉",
+        "被动",
+        "信息隐藏",
+        "过度内敛"
+      ],
+      "archetypes": "智慧女性/神秘者/守秘人",
+      "wuxing_mapping": "水",
+      "gua_mapping": "坤为地"
+    },
+    {
+      "num": 3,
+      "name": "皇后",
+      "name_en": "The Empress",
+      "element": "土",
+      "keywords": "丰饶/母性/创造/滋养",
+      "upright_keywords": [
+        "丰盛",
+        "滋养",
+        "创造力",
+        "母性",
+        "自然"
+      ],
+      "reversed_keywords": [
+        "过度依赖",
+        "创造力停滞",
+        "占有欲",
+        "过度保护",
+        "忽视自我"
+      ],
+      "archetypes": "大地母亲/创造女神/丰收",
+      "wuxing_mapping": "土",
+      "gua_mapping": "地天泰"
+    },
+    {
+      "num": 4,
+      "name": "皇帝",
+      "name_en": "The Emperor",
+      "element": "火",
+      "keywords": "权威/结构/控制/秩序",
+      "upright_keywords": [
+        "领导力",
+        "秩序",
+        "稳定",
+        "权威",
+        "结构"
+      ],
+      "reversed_keywords": [
+        "专制",
+        "固执",
+        "僵化",
+        "滥用权力",
+        "控制欲过强"
+      ],
+      "archetypes": "父亲/统治者/建筑师",
+      "wuxing_mapping": "木",
+      "gua_mapping": "雷天大壮"
+    },
+    {
+      "num": 5,
+      "name": "教皇",
+      "name_en": "The Hierophant",
+      "element": "土",
+      "keywords": "传统/信仰/教育/引导",
+      "upright_keywords": [
+        "传统",
+        "教导",
+        "精神引导",
+        "归属感",
+        "仪式"
+      ],
+      "reversed_keywords": [
+        "教条",
+        "保守",
+        "束缚",
+        "反传统",
+        "个人信念"
+      ],
+      "archetypes": "导师/祭司/传统守护者",
+      "wuxing_mapping": "土",
+      "gua_mapping": "风山渐"
+    },
+    {
+      "num": 6,
+      "name": "恋人",
+      "name_en": "The Lovers",
+      "element": "风",
+      "keywords": "选择/关系/和谐/价值观",
+      "upright_keywords": [
+        "爱情",
+        "选择",
+        "和谐",
+        "价值观契合",
+        "联结"
+      ],
+      "reversed_keywords": [
+        "分离",
+        "错误选择",
+        "不忠",
+        "价值观冲突",
+        "犹豫不决"
+      ],
+      "archetypes": "恋人/选择者/联结者",
+      "wuxing_mapping": "金",
+      "gua_mapping": "泽山咸"
+    },
+    {
+      "num": 7,
+      "name": "战车",
+      "name_en": "The Chariot",
+      "element": "水",
+      "keywords": "胜利/意志/前进/控制",
+      "upright_keywords": [
+        "胜利",
+        "决心",
+        "控制力",
+        "前进",
+        "意志力"
+      ],
+      "reversed_keywords": [
+        "失控",
+        "冲动",
+        "方向迷失",
+        "失败",
+        "缺乏自律"
+      ],
+      "archetypes": "英雄/战士/征服者",
+      "wuxing_mapping": "水",
+      "gua_mapping": "地水师"
+    },
+    {
+      "num": 8,
+      "name": "力量",
+      "name_en": "Strength",
+      "element": "火",
+      "keywords": "勇气/耐心/内在力量/柔韧",
+      "upright_keywords": [
+        "勇气",
+        "柔韧",
+        "内在力量",
+        "耐心",
+        "自我控制"
+      ],
+      "reversed_keywords": [
+        "软弱",
+        "自我怀疑",
+        "失去信心",
+        "暴躁",
+        "缺乏勇气"
+      ],
+      "archetypes": "驯兽者/内在力量/坚韧",
+      "wuxing_mapping": "木",
+      "gua_mapping": "风天小畜"
+    },
+    {
+      "num": 9,
+      "name": "隐士",
+      "name_en": "The Hermit",
+      "element": "土",
+      "keywords": "内省/独处/智慧/寻道",
+      "upright_keywords": [
+        "内省",
+        "智慧",
+        "独处",
+        "指引",
+        "灵性探索"
+      ],
+      "reversed_keywords": [
+        "孤立",
+        "固执",
+        "退缩",
+        "过度孤独",
+        "拒绝引导"
+      ],
+      "archetypes": "隐士/智者/寻道者",
+      "wuxing_mapping": "土",
+      "gua_mapping": "山水蒙"
+    },
+    {
+      "num": 10,
+      "name": "命运之轮",
+      "name_en": "Wheel of Fortune",
+      "element": "火",
+      "keywords": "命运/转折/循环/机遇",
+      "upright_keywords": [
+        "好运",
+        "转折点",
+        "机遇",
+        "命运",
+        "循环"
+      ],
+      "reversed_keywords": [
+        "厄运",
+        "停滞",
+        "抗拒变化",
+        "错失良机",
+        "运气逆转"
+      ],
+      "archetypes": "命运/循环/转轮",
+      "wuxing_mapping": "木",
+      "gua_mapping": "泽火革"
+    },
+    {
+      "num": 11,
+      "name": "正义",
+      "name_en": "Justice",
+      "element": "风",
+      "keywords": "公正/因果/平衡/真相",
+      "upright_keywords": [
+        "公正",
+        "真相",
+        "平衡",
+        "因果",
+        "法律"
+      ],
+      "reversed_keywords": [
+        "不公",
+        "偏见",
+        "失衡",
+        "逃避责任",
+        "错误判断"
+      ],
+      "archetypes": "法官/公正/平衡者",
+      "wuxing_mapping": "金",
+      "gua_mapping": "天水讼"
+    },
+    {
+      "num": 12,
+      "name": "倒吊人",
+      "name_en": "The Hanged Man",
+      "element": "水",
+      "keywords": "牺牲/放下/新视角/等待",
+      "upright_keywords": [
+        "牺牲",
+        "顿悟",
+        "新视角",
+        "放下",
+        "等待"
+      ],
+      "reversed_keywords": [
+        "无谓牺牲",
+        "拖延",
+        "受害者心态",
+        "抗拒放下",
+        "停滞不前"
+      ],
+      "archetypes": "牺牲者/悬吊者/觉醒者",
+      "wuxing_mapping": "水",
+      "gua_mapping": "山雷颐"
+    },
+    {
+      "num": 13,
+      "name": "死神",
+      "name_en": "Death",
+      "element": "水",
+      "keywords": "结束/转化/重生/蜕变",
+      "upright_keywords": [
+        "结束",
+        "转变",
+        "重生",
+        "蜕变",
+        "放手"
+      ],
+      "reversed_keywords": [
+        "抗拒变化",
+        "停滞",
+        "恐惧转变",
+        "拖延终结",
+        "无法放手"
+      ],
+      "archetypes": "死神/蜕变者/终结",
+      "wuxing_mapping": "水",
+      "gua_mapping": "山地剥"
+    },
+    {
+      "num": 14,
+      "name": "节制",
+      "name_en": "Temperance",
+      "element": "火",
+      "keywords": "平衡/调和/耐心/适度",
+      "upright_keywords": [
+        "平衡",
+        "调和",
+        "适度",
+        "耐心",
+        "融合"
+      ],
+      "reversed_keywords": [
+        "失衡",
+        "过度",
+        "不协调",
+        "缺乏耐心",
+        "极端"
+      ],
+      "archetypes": "调和者/天使/炼金术士",
+      "wuxing_mapping": "木",
+      "gua_mapping": "水火既济"
+    },
+    {
+      "num": 15,
+      "name": "恶魔",
+      "name_en": "The Devil",
+      "element": "土",
+      "keywords": "束缚/欲望/物质/执着",
+      "upright_keywords": [
+        "雄心",
+        "物质成就",
+        "承诺",
+        "欲望",
+        "世俗力量"
+      ],
+      "reversed_keywords": [
+        "束缚",
+        "成瘾",
+        "贪欲",
+        "物化",
+        "挣脱锁链"
+      ],
+      "archetypes": "阴影/欲望/束缚者",
+      "wuxing_mapping": "土",
+      "gua_mapping": "泽水困"
+    },
+    {
+      "num": 16,
+      "name": "高塔",
+      "name_en": "The Tower",
+      "element": "火",
+      "keywords": "突变/破坏/觉醒/崩塌",
+      "upright_keywords": [
+        "突然觉醒",
+        "打破旧制",
+        " revelation",
+        "解放",
+        "必要的破坏"
+      ],
+      "reversed_keywords": [
+        "灾难",
+        "毁灭",
+        "混乱",
+        "逃避崩塌",
+        "延迟的危机"
+      ],
+      "archetypes": "高塔/崩塌/觉醒",
+      "wuxing_mapping": "木",
+      "gua_mapping": "震为雷"
+    },
+    {
+      "num": 17,
+      "name": "星星",
+      "name_en": "The Star",
+      "element": "风",
+      "keywords": "希望/灵感/信念/疗愈",
+      "upright_keywords": [
+        "希望",
+        "灵感",
+        "宁静",
+        "信念",
+        "疗愈"
+      ],
+      "reversed_keywords": [
+        "失望",
+        "悲观",
+        "失去信心",
+        "绝望",
+        "自我怀疑"
+      ],
+      "archetypes": "星星/希望/疗愈者",
+      "wuxing_mapping": "金",
+      "gua_mapping": "水风井"
+    },
+    {
+      "num": 18,
+      "name": "月亮",
+      "name_en": "The Moon",
+      "element": "水",
+      "keywords": "幻象/恐惧/潜意识/直觉",
+      "upright_keywords": [
+        "直觉",
+        "梦境",
+        "创造力",
+        "潜意识",
+        "深层感受"
+      ],
+      "reversed_keywords": [
+        "迷惑",
+        "恐惧",
+        "幻觉",
+        "焦虑",
+        "欺骗"
+      ],
+      "archetypes": "月亮/幻象/潜意识",
+      "wuxing_mapping": "水",
+      "gua_mapping": "泽地萃"
+    },
+    {
+      "num": 19,
+      "name": "太阳",
+      "name_en": "The Sun",
+      "element": "火",
+      "keywords": "成功/快乐/活力/光明",
+      "upright_keywords": [
+        "成功",
+        "快乐",
+        "活力",
+        "光明",
+        "显化"
+      ],
+      "reversed_keywords": [
+        "暂时挫折",
+        "过度乐观",
+        "自我中心",
+        "延迟成功",
+        "阴霾"
+      ],
+      "archetypes": "太阳/孩童/光明",
+      "wuxing_mapping": "木",
+      "gua_mapping": "火地晋"
+    },
+    {
+      "num": 20,
+      "name": "审判",
+      "name_en": "Judgement",
+      "element": "火",
+      "keywords": "觉醒/重生/召唤/决断",
+      "upright_keywords": [
+        "觉醒",
+        "重生",
+        "宽恕",
+        "召唤",
+        "内在呼唤"
+      ],
+      "reversed_keywords": [
+        "自我谴责",
+        "错过召唤",
+        "犹豫",
+        "逃避审判",
+        "无法宽恕"
+      ],
+      "archetypes": "审判/天使/重生者",
+      "wuxing_mapping": "木",
+      "gua_mapping": "地风升"
+    },
+    {
+      "num": 21,
+      "name": "世界",
+      "name_en": "The World",
+      "element": "土",
+      "keywords": "完成/圆满/成就/整合",
+      "upright_keywords": [
+        "完成",
+        "圆满",
+        "成就",
+        "整合",
+        "旅程终点"
+      ],
+      "reversed_keywords": [
+        "未完成",
+        "停滞",
+        "缺乏收尾",
+        "延迟完成",
+        "无法整合"
+      ],
+      "archetypes": "世界/舞者/圆满",
+      "wuxing_mapping": "土",
+      "gua_mapping": "火风鼎"
+    }
+  ],
+  "minor_arcana": [
+    {
+      "num": 1,
+      "suit": "权杖",
+      "suit_en": "Wands",
+      "name": "权杖一",
+      "name_en": "Ace of Wands",
+      "element": "火",
+      "keywords": "新行动/灵感/激情/创造",
+      "upright_keywords": [
+        "新灵感",
+        "创造力爆发",
+        "激情",
+        "新事业",
+        "勇气"
+      ],
+      "reversed_keywords": [
+        "延迟",
+        "缺乏灵感",
+        "拖延",
+        "创造力受阻",
+        "犹豫不决"
+      ],
+      "wuxing_mapping": "木",
+      "gua_mapping": "震为雷"
+    },
+    {
+      "num": 2,
+      "suit": "权杖",
+      "suit_en": "Wands",
+      "name": "权杖二",
+      "name_en": "Two of Wands",
+      "element": "火",
+      "keywords": "规划/决策/远见/选择",
+      "upright_keywords": [
+        "规划",
+        "远见",
+        "决策",
+        "未来选择",
+        "掌控"
+      ],
+      "reversed_keywords": [
+        "犹豫",
+        "缺乏计划",
+        "害怕未知",
+        "困于现状",
+        "短视"
+      ],
+      "wuxing_mapping": "木",
+      "gua_mapping": "巽为风"
+    },
+    {
+      "num": 3,
+      "suit": "权杖",
+      "suit_en": "Wands",
+      "name": "权杖三",
+      "name_en": "Three of Wands",
+      "element": "火",
+      "keywords": "扩展/视野/前景/展望",
+      "upright_keywords": [
+        "扩展",
+        "前景",
+        "视野",
+        "机会",
+        "远见"
+      ],
+      "reversed_keywords": [
+        "延迟",
+        "阻碍扩展",
+        "短视",
+        "错失机会",
+        "固步自封"
+      ],
+      "wuxing_mapping": "木",
+      "gua_mapping": "地风升"
+    },
+    {
+      "num": 4,
+      "suit": "权杖",
+      "suit_en": "Wands",
+      "name": "权杖四",
+      "name_en": "Four of Wands",
+      "element": "火",
+      "keywords": "庆祝/和谐/稳固/归属",
+      "upright_keywords": [
+        "庆祝",
+        "和谐",
+        "稳固",
+        "归属感",
+        "里程碑"
+      ],
+      "reversed_keywords": [
+        "不稳定",
+        "缺乏归属",
+        "过渡期",
+        "冲突",
+        "推迟庆祝"
+      ],
+      "wuxing_mapping": "木",
+      "gua_mapping": "风火家人"
+    },
+    {
+      "num": 5,
+      "suit": "权杖",
+      "suit_en": "Wands",
+      "name": "权杖五",
+      "name_en": "Five of Wands",
+      "element": "火",
+      "keywords": "竞争/冲突/争夺/混战",
+      "upright_keywords": [
+        "竞争",
+        "冲突",
+        "挑战",
+        "多元观点",
+        "磨砺"
+      ],
+      "reversed_keywords": [
+        "回避冲突",
+        "内耗",
+        "僵局",
+        "妥协",
+        "压力缓解"
+      ],
+      "wuxing_mapping": "木",
+      "gua_mapping": "天雷无妄"
+    },
+    {
+      "num": 6,
+      "suit": "权杖",
+      "suit_en": "Wands",
+      "name": "权杖六",
+      "name_en": "Six of Wands",
+      "element": "火",
+      "keywords": "胜利/认可/荣耀/成功",
+      "upright_keywords": [
+        "胜利",
+        "认可",
+        "荣耀",
+        "成功",
+        "公众赞誉"
+      ],
+      "reversed_keywords": [
+        "失败",
+        "缺乏认可",
+        "名声受损",
+        "自负",
+        "从胜利跌落"
+      ],
+      "wuxing_mapping": "木",
+      "gua_mapping": "火天大有"
+    },
+    {
+      "num": 7,
+      "suit": "权杖",
+      "suit_en": "Wands",
+      "name": "权杖七",
+      "name_en": "Seven of Wands",
+      "element": "火",
+      "keywords": "防御/坚持/挑战/守卫",
+      "upright_keywords": [
+        "防御",
+        "坚持",
+        "挑战",
+        "立场坚定",
+        "守卫"
+      ],
+      "reversed_keywords": [
+        "屈服",
+        "放弃立场",
+        " overwhelmed",
+        "退让",
+        "力不从心"
+      ],
+      "wuxing_mapping": "木",
+      "gua_mapping": "雷天大壮"
+    },
+    {
+      "num": 8,
+      "suit": "权杖",
+      "suit_en": "Wands",
+      "name": "权杖八",
+      "name_en": "Eight of Wands",
+      "element": "火",
+      "keywords": "快速/行动/变化/消息",
+      "upright_keywords": [
+        "快速",
+        "行动",
+        "变化",
+        "消息",
+        "进展"
+      ],
+      "reversed_keywords": [
+        "延迟",
+        "阻碍",
+        "混乱",
+        "急躁",
+        "方向不明"
+      ],
+      "wuxing_mapping": "木",
+      "gua_mapping": "地雷复"
+    },
+    {
+      "num": 9,
+      "suit": "权杖",
+      "suit_en": "Wands",
+      "name": "权杖九",
+      "name_en": "Nine of Wands",
+      "element": "火",
+      "keywords": "坚韧/警惕/最后坚持/防御",
+      "upright_keywords": [
+        "坚韧",
+        "警惕",
+        "毅力",
+        "最后防线",
+        "坚持"
+      ],
+      "reversed_keywords": [
+        "疲惫",
+        "放弃",
+        "偏执",
+        "防御过度",
+        "力竭"
+      ],
+      "wuxing_mapping": "木",
+      "gua_mapping": "山雷颐"
+    },
+    {
+      "num": 10,
+      "suit": "权杖",
+      "suit_en": "Wands",
+      "name": "权杖十",
+      "name_en": "Ten of Wands",
+      "element": "火",
+      "keywords": "重负/压力/责任/负担",
+      "upright_keywords": [
+        "责任",
+        "重负",
+        "压力",
+        "负担",
+        "尽职"
+      ],
+      "reversed_keywords": [
+        "放下负担",
+        "解脱",
+        " delegating",
+        "过度劳累",
+        "崩溃"
+      ],
+      "wuxing_mapping": "木",
+      "gua_mapping": "水雷屯"
+    },
+    {
+      "num": 11,
+      "suit": "权杖",
+      "suit_en": "Wands",
+      "name": "权杖侍从",
+      "name_en": "Page of Wands",
+      "element": "火",
+      "keywords": "探索/热情/新消息/冒险",
+      "upright_keywords": [
+        "探索",
+        "热情",
+        "新消息",
+        "冒险精神",
+        "创意萌芽"
+      ],
+      "reversed_keywords": [
+        "缺乏方向",
+        "半途而废",
+        "拖延",
+        "不成熟",
+        "计划取消"
+      ],
+      "wuxing_mapping": "木",
+      "gua_mapping": "风雷益"
+    },
+    {
+      "num": 12,
+      "suit": "权杖",
+      "suit_en": "Wands",
+      "name": "权杖骑士",
+      "name_en": "Knight of Wands",
+      "element": "火",
+      "keywords": "冒险/冲动/行动力/热情",
+      "upright_keywords": [
+        "冒险",
+        "冲动",
+        "行动力",
+        "热情",
+        "进取"
+      ],
+      "reversed_keywords": [
+        "鲁莽",
+        "冲动失控",
+        "半途而废",
+        "暴躁",
+        "方向迷失"
+      ],
+      "wuxing_mapping": "木",
+      "gua_mapping": "火雷噬嗑"
+    },
+    {
+      "num": 13,
+      "suit": "权杖",
+      "suit_en": "Wands",
+      "name": "权杖王后",
+      "name_en": "Queen of Wands",
+      "element": "火",
+      "keywords": "温暖/自信/魅力/领导",
+      "upright_keywords": [
+        "温暖",
+        "自信",
+        "魅力",
+        "领导力",
+        "独立"
+      ],
+      "reversed_keywords": [
+        "嫉妒",
+        "不安全感",
+        "专横",
+        "自我中心",
+        "压抑热情"
+      ],
+      "wuxing_mapping": "木",
+      "gua_mapping": "雷火丰"
+    },
+    {
+      "num": 14,
+      "suit": "权杖",
+      "suit_en": "Wands",
+      "name": "权杖国王",
+      "name_en": "King of Wands",
+      "element": "火",
+      "keywords": "领导/远见/权威/愿景",
+      "upright_keywords": [
+        "领导",
+        "远见",
+        "权威",
+        "愿景",
+        "果断"
+      ],
+      "reversed_keywords": [
+        "专制",
+        "冲动",
+        "苛刻",
+        "不切实际",
+        "滥用权威"
+      ],
+      "wuxing_mapping": "木",
+      "gua_mapping": "火风鼎"
+    },
+    {
+      "num": 1,
+      "suit": "圣杯",
+      "suit_en": "Cups",
+      "name": "圣杯一",
+      "name_en": "Ace of Cups",
+      "element": "水",
+      "keywords": "新情感/爱/直觉/灵性",
+      "upright_keywords": [
+        "新情感",
+        "爱",
+        "直觉",
+        "灵性觉醒",
+        "情感开放"
+      ],
+      "reversed_keywords": [
+        "情感阻塞",
+        "冷漠",
+        "空虚",
+        "压抑感受",
+        "灵感枯竭"
+      ],
+      "wuxing_mapping": "水",
+      "gua_mapping": "坎为水"
+    },
+    {
+      "num": 2,
+      "suit": "圣杯",
+      "suit_en": "Cups",
+      "name": "圣杯二",
+      "name_en": "Two of Cups",
+      "element": "水",
+      "keywords": "吸引/连接/伙伴/和谐",
+      "upright_keywords": [
+        "吸引",
+        "连接",
+        "伙伴关系",
+        "和谐",
+        "相互理解"
+      ],
+      "reversed_keywords": [
+        "分离",
+        "失衡",
+        "误解",
+        "关系破裂",
+        "情感断裂"
+      ],
+      "wuxing_mapping": "水",
+      "gua_mapping": "泽山咸"
+    },
+    {
+      "num": 3,
+      "suit": "圣杯",
+      "suit_en": "Cups",
+      "name": "圣杯三",
+      "name_en": "Three of Cups",
+      "element": "水",
+      "keywords": "庆祝/友谊/欢乐/社交",
+      "upright_keywords": [
+        "庆祝",
+        "友谊",
+        "欢乐",
+        "社交",
+        "聚会"
+      ],
+      "reversed_keywords": [
+        "过度享乐",
+        "社交疲劳",
+        "八卦",
+        "孤立",
+        "冲突"
+      ],
+      "wuxing_mapping": "水",
+      "gua_mapping": "兑为泽"
+    },
+    {
+      "num": 4,
+      "suit": "圣杯",
+      "suit_en": "Cups",
+      "name": "圣杯四",
+      "name_en": "Four of Cups",
+      "element": "水",
+      "keywords": "冷漠/厌倦/内省/犹豫",
+      "upright_keywords": [
+        "内省",
+        "冥想",
+        "重新评估",
+        "冷淡",
+        "沉思"
+      ],
+      "reversed_keywords": [
+        "觉醒",
+        "接受机会",
+        "走出倦怠",
+        "后悔",
+        "错失"
+      ],
+      "wuxing_mapping": "水",
+      "gua_mapping": "风地观"
+    },
+    {
+      "num": 5,
+      "suit": "圣杯",
+      "suit_en": "Cups",
+      "name": "圣杯五",
+      "name_en": "Five of Cups",
+      "element": "水",
+      "keywords": "失落/悲伤/遗憾/哀悼",
+      "upright_keywords": [
+        "失落",
+        "悲伤",
+        "遗憾",
+        "哀悼",
+        "部分损失"
+      ],
+      "reversed_keywords": [
+        "接受",
+        "释怀",
+        "向前看",
+        "修复",
+        "恢复"
+      ],
+      "wuxing_mapping": "水",
+      "gua_mapping": "风水涣"
+    },
+    {
+      "num": 6,
+      "suit": "圣杯",
+      "suit_en": "Cups",
+      "name": "圣杯六",
+      "name_en": "Six of Cups",
+      "element": "水",
+      "keywords": "怀旧/回忆/童年/纯真",
+      "upright_keywords": [
+        "怀旧",
+        "回忆",
+        "童年",
+        "纯真",
+        "重逢"
+      ],
+      "reversed_keywords": [
+        "固守过去",
+        "停滞",
+        "不切实际的回忆",
+        "放下",
+        "向前"
+      ],
+      "wuxing_mapping": "水",
+      "gua_mapping": "水地比"
+    },
+    {
+      "num": 7,
+      "suit": "圣杯",
+      "suit_en": "Cups",
+      "name": "圣杯七",
+      "name_en": "Seven of Cups",
+      "element": "水",
+      "keywords": "迷惑/选择/幻想/诱惑",
+      "upright_keywords": [
+        "选择",
+        "幻想",
+        "可能性",
+        "梦想",
+        "迷惑"
+      ],
+      "reversed_keywords": [
+        "清晰",
+        "做出选择",
+        "面对现实",
+        "幻想破灭",
+        "决断"
+      ],
+      "wuxing_mapping": "水",
+      "gua_mapping": "山水蒙"
+    },
+    {
+      "num": 8,
+      "suit": "圣杯",
+      "suit_en": "Cups",
+      "name": "圣杯八",
+      "name_en": "Eight of Cups",
+      "element": "水",
+      "keywords": "放弃/离开/转变/寻找",
+      "upright_keywords": [
+        "放弃",
+        "离开",
+        "寻找更深意义",
+        "转变",
+        "内在召唤"
+      ],
+      "reversed_keywords": [
+        "回归",
+        "害怕改变",
+        "徘徊",
+        "无法放下",
+        "停滞"
+      ],
+      "wuxing_mapping": "水",
+      "gua_mapping": "水风井"
+    },
+    {
+      "num": 9,
+      "suit": "圣杯",
+      "suit_en": "Cups",
+      "name": "圣杯九",
+      "name_en": "Nine of Cups",
+      "element": "水",
+      "keywords": "满足/幸福/愿望/知足",
+      "upright_keywords": [
+        "满足",
+        "幸福",
+        "愿望成真",
+        "知足",
+        "享受"
+      ],
+      "reversed_keywords": [
+        "不满",
+        "贪心",
+        "表面满足",
+        "自满",
+        "愿望落空"
+      ],
+      "wuxing_mapping": "水",
+      "gua_mapping": "水泽节"
+    },
+    {
+      "num": 10,
+      "suit": "圣杯",
+      "suit_en": "Cups",
+      "name": "圣杯十",
+      "name_en": "Ten of Cups",
+      "element": "水",
+      "keywords": "和谐/家庭/圆满/幸福",
+      "upright_keywords": [
+        "和谐",
+        "家庭",
+        "圆满",
+        "幸福",
+        "情感满足"
+      ],
+      "reversed_keywords": [
+        "家庭冲突",
+        "不和谐",
+        "价值观分歧",
+        "破碎",
+        "表面和谐"
+      ],
+      "wuxing_mapping": "水",
+      "gua_mapping": "泽地萃"
+    },
+    {
+      "num": 11,
+      "suit": "圣杯",
+      "suit_en": "Cups",
+      "name": "圣杯侍从",
+      "name_en": "Page of Cups",
+      "element": "水",
+      "keywords": "情感萌芽/直觉/好奇/创意",
+      "upright_keywords": [
+        "情感萌芽",
+        "直觉",
+        "好奇",
+        "创意",
+        "消息"
+      ],
+      "reversed_keywords": [
+        "情感不成熟",
+        "情绪化",
+        "逃避现实",
+        "缺乏直觉",
+        "过度敏感"
+      ],
+      "wuxing_mapping": "水",
+      "gua_mapping": "风山渐"
+    },
+    {
+      "num": 12,
+      "suit": "圣杯",
+      "suit_en": "Cups",
+      "name": "圣杯骑士",
+      "name_en": "Knight of Cups",
+      "element": "水",
+      "keywords": "浪漫/理想/追求/艺术",
+      "upright_keywords": [
+        "浪漫",
+        "理想",
+        "追求",
+        "艺术",
+        "魅力"
+      ],
+      "reversed_keywords": [
+        "不切实际",
+        "情绪化",
+        "嫉妒",
+        "空想",
+        "幻想破灭"
+      ],
+      "wuxing_mapping": "水",
+      "gua_mapping": "风泽中孚"
+    },
+    {
+      "num": 13,
+      "suit": "圣杯",
+      "suit_en": "Cups",
+      "name": "圣杯王后",
+      "name_en": "Queen of Cups",
+      "element": "水",
+      "keywords": "关爱/慈悲/情感智慧/直觉",
+      "upright_keywords": [
+        "关爱",
+        "慈悲",
+        "情感智慧",
+        "直觉",
+        "接纳"
+      ],
+      "reversed_keywords": [
+        "情感依赖",
+        "过度敏感",
+        "情绪不稳",
+        "忽视自我",
+        "情感操控"
+      ],
+      "wuxing_mapping": "水",
+      "gua_mapping": "地泽临"
+    },
+    {
+      "num": 14,
+      "suit": "圣杯",
+      "suit_en": "Cups",
+      "name": "圣杯国王",
+      "name_en": "King of Cups",
+      "element": "水",
+      "keywords": "情感平衡/宽容/智慧/艺术",
+      "upright_keywords": [
+        "情感平衡",
+        "宽容",
+        "智慧",
+        "艺术",
+        "冷静"
+      ],
+      "reversed_keywords": [
+        "情绪压抑",
+        "冷漠",
+        "操控",
+        "情绪化",
+        "逃避"
+      ],
+      "wuxing_mapping": "水",
+      "gua_mapping": "地天泰"
+    },
+    {
+      "num": 1,
+      "suit": "宝剑",
+      "suit_en": "Swords",
+      "name": "宝剑一",
+      "name_en": "Ace of Swords",
+      "element": "风",
+      "keywords": "清晰/真相/新思想/突破",
+      "upright_keywords": [
+        "清晰",
+        "真相",
+        "新思想",
+        "突破",
+        "决断"
+      ],
+      "reversed_keywords": [
+        "混乱",
+        "不公",
+        "错误判断",
+        "缺乏清晰",
+        "言语伤人"
+      ],
+      "wuxing_mapping": "金",
+      "gua_mapping": "乾为天"
+    },
+    {
+      "num": 2,
+      "suit": "宝剑",
+      "suit_en": "Swords",
+      "name": "宝剑二",
+      "name_en": "Two of Swords",
+      "element": "风",
+      "keywords": "平衡/选择/回避/僵局",
+      "upright_keywords": [
+        "平衡",
+        "选择",
+        "僵局",
+        "回避",
+        "内心矛盾"
+      ],
+      "reversed_keywords": [
+        "做出决定",
+        "打破僵局",
+        "信息揭露",
+        "情绪释放",
+        "冲动选择"
+      ],
+      "wuxing_mapping": "金",
+      "gua_mapping": "风泽中孚"
+    },
+    {
+      "num": 3,
+      "suit": "宝剑",
+      "suit_en": "Swords",
+      "name": "宝剑三",
+      "name_en": "Three of Swords",
+      "element": "风",
+      "keywords": "心碎/悲伤/痛苦/背叛",
+      "upright_keywords": [
+        "心碎",
+        "悲伤",
+        "痛苦",
+        "背叛",
+        "分离"
+      ],
+      "reversed_keywords": [
+        "疗愈",
+        "原谅",
+        "走出痛苦",
+        "残余伤痛",
+        " reconciliation"
+      ],
+      "wuxing_mapping": "金",
+      "gua_mapping": "地火明夷"
+    },
+    {
+      "num": 4,
+      "suit": "宝剑",
+      "suit_en": "Swords",
+      "name": "宝剑四",
+      "name_en": "Four of Swords",
+      "element": "风",
+      "keywords": "休息/恢复/休战/冥想",
+      "upright_keywords": [
+        "休息",
+        "恢复",
+        "冥想",
+        "休战",
+        "内省"
+      ],
+      "reversed_keywords": [
+        " restless",
+        "疲倦",
+        "被迫休息",
+        "恢复后行动",
+        "焦虑"
+      ],
+      "wuxing_mapping": "金",
+      "gua_mapping": "艮为山"
+    },
+    {
+      "num": 5,
+      "suit": "宝剑",
+      "suit_en": "Swords",
+      "name": "宝剑五",
+      "name_en": "Five of Swords",
+      "element": "风",
+      "keywords": "空虚胜利/冲突/失落/争斗",
+      "upright_keywords": [
+        "冲突",
+        "空虚胜利",
+        "争斗",
+        "胜之不武",
+        "策略"
+      ],
+      "reversed_keywords": [
+        "和解",
+        "放下争斗",
+        "反思",
+        "妥协",
+        "后悔"
+      ],
+      "wuxing_mapping": "金",
+      "gua_mapping": "天水讼"
+    },
+    {
+      "num": 6,
+      "suit": "宝剑",
+      "suit_en": "Swords",
+      "name": "宝剑六",
+      "name_en": "Six of Swords",
+      "element": "风",
+      "keywords": "过渡/疗愈/前行/远离",
+      "upright_keywords": [
+        "过渡",
+        "疗愈",
+        "前行",
+        "远离",
+        "平静"
+      ],
+      "reversed_keywords": [
+        "停滞",
+        "无法离开",
+        "未解决的过去",
+        " resistance",
+        "回流"
+      ],
+      "wuxing_mapping": "金",
+      "gua_mapping": "雷水解"
+    },
+    {
+      "num": 7,
+      "suit": "宝剑",
+      "suit_en": "Swords",
+      "name": "宝剑七",
+      "name_en": "Seven of Swords",
+      "element": "风",
+      "keywords": "欺骗/策略/暗中行动/回避",
+      "upright_keywords": [
+        "策略",
+        "暗中行动",
+        "独立",
+        "机智",
+        "回避"
+      ],
+      "reversed_keywords": [
+        "揭露",
+        "坦诚",
+        "回归正道",
+        "被识破",
+        "confession"
+      ],
+      "wuxing_mapping": "金",
+      "gua_mapping": "天山遁"
+    },
+    {
+      "num": 8,
+      "suit": "宝剑",
+      "suit_en": "Swords",
+      "name": "宝剑八",
+      "name_en": "Eight of Swords",
+      "element": "风",
+      "keywords": "困局/束缚/受限思维/无助",
+      "upright_keywords": [
+        "困局",
+        "束缚",
+        "受限思维",
+        "无助",
+        "自我设限"
+      ],
+      "reversed_keywords": [
+        "解放",
+        "觉醒",
+        "打破束缚",
+        "新视角",
+        "自我赋权"
+      ],
+      "wuxing_mapping": "金",
+      "gua_mapping": "泽水困"
+    },
+    {
+      "num": 9,
+      "suit": "宝剑",
+      "suit_en": "Swords",
+      "name": "宝剑九",
+      "name_en": "Nine of Swords",
+      "element": "风",
+      "keywords": "焦虑/失眠/恐惧/噩梦",
+      "upright_keywords": [
+        "焦虑",
+        "失眠",
+        "恐惧",
+        "噩梦",
+        "担忧"
+      ],
+      "reversed_keywords": [
+        "恢复",
+        "释放恐惧",
+        "希望",
+        "面对现实",
+        "走出绝望"
+      ],
+      "wuxing_mapping": "金",
+      "gua_mapping": "坎为水"
+    },
+    {
+      "num": 10,
+      "suit": "宝剑",
+      "suit_en": "Swords",
+      "name": "宝剑十",
+      "name_en": "Ten of Swords",
+      "element": "风",
+      "keywords": "结束/痛苦终结/谷底/重生",
+      "upright_keywords": [
+        "结束",
+        "痛苦终结",
+        "谷底",
+        "背叛",
+        "新开始"
+      ],
+      "reversed_keywords": [
+        "恢复",
+        "最坏已过",
+        "重生",
+        "残余痛苦",
+        "存活"
+      ],
+      "wuxing_mapping": "金",
+      "gua_mapping": "泽火革"
+    },
+    {
+      "num": 11,
+      "suit": "宝剑",
+      "suit_en": "Swords",
+      "name": "宝剑侍从",
+      "name_en": "Page of Swords",
+      "element": "风",
+      "keywords": "好奇/警觉/新想法/间谍",
+      "upright_keywords": [
+        "好奇",
+        "警觉",
+        "新想法",
+        "机智",
+        "消息"
+      ],
+      "reversed_keywords": [
+        "八卦",
+        "缺乏计划",
+        "口无遮拦",
+        "欺骗",
+        "通信问题"
+      ],
+      "wuxing_mapping": "金",
+      "gua_mapping": "风地观"
+    },
+    {
+      "num": 12,
+      "suit": "宝剑",
+      "suit_en": "Swords",
+      "name": "宝剑骑士",
+      "name_en": "Knight of Swords",
+      "element": "风",
+      "keywords": "果断/直接/冲突/急速",
+      "upright_keywords": [
+        "果断",
+        "直接",
+        "行动力",
+        "急速",
+        "勇敢"
+      ],
+      "reversed_keywords": [
+        "鲁莽",
+        "冲动",
+        "攻击性",
+        "缺乏计划",
+        "破坏性"
+      ],
+      "wuxing_mapping": "金",
+      "gua_mapping": "泽天夬"
+    },
+    {
+      "num": 13,
+      "suit": "宝剑",
+      "suit_en": "Swords",
+      "name": "宝剑王后",
+      "name_en": "Queen of Swords",
+      "element": "风",
+      "keywords": "独立/洞察/直率/理性",
+      "upright_keywords": [
+        "独立",
+        "洞察",
+        "直率",
+        "理性",
+        "公正"
+      ],
+      "reversed_keywords": [
+        "冷酷",
+        "苛刻",
+        "孤立",
+        "刻薄",
+        "情绪化"
+      ],
+      "wuxing_mapping": "金",
+      "gua_mapping": "天泽履"
+    },
+    {
+      "num": 14,
+      "suit": "宝剑",
+      "suit_en": "Swords",
+      "name": "宝剑国王",
+      "name_en": "King of Swords",
+      "element": "风",
+      "keywords": "权威/判断/公正/智慧",
+      "upright_keywords": [
+        "权威",
+        "判断",
+        "公正",
+        "智慧",
+        "清晰"
+      ],
+      "reversed_keywords": [
+        "暴虐",
+        "冷酷",
+        "操控",
+        "不公",
+        "滥用权力"
+      ],
+      "wuxing_mapping": "金",
+      "gua_mapping": "天地否"
+    },
+    {
+      "num": 1,
+      "suit": "星币",
+      "suit_en": "Pentacles",
+      "name": "星币一",
+      "name_en": "Ace of Pentacles",
+      "element": "土",
+      "keywords": "新机会/繁荣/物质基础/丰盛",
+      "upright_keywords": [
+        "新机会",
+        "繁荣",
+        "物质基础",
+        "丰盛",
+        "投资"
+      ],
+      "reversed_keywords": [
+        "错失机会",
+        "匮乏",
+        "财务困难",
+        "拖延",
+        "不切实际"
+      ],
+      "wuxing_mapping": "土",
+      "gua_mapping": "坤为地"
+    },
+    {
+      "num": 2,
+      "suit": "星币",
+      "suit_en": "Pentacles",
+      "name": "星币二",
+      "name_en": "Two of Pentacles",
+      "element": "土",
+      "keywords": "灵活/平衡/多任务/适应",
+      "upright_keywords": [
+        "灵活",
+        "平衡",
+        "多任务",
+        "适应",
+        "调整"
+      ],
+      "reversed_keywords": [
+        "失衡",
+        "过载",
+        "混乱",
+        "无法兼顾",
+        "优先级混乱"
+      ],
+      "wuxing_mapping": "土",
+      "gua_mapping": "地山谦"
+    },
+    {
+      "num": 3,
+      "suit": "星币",
+      "suit_en": "Pentacles",
+      "name": "星币三",
+      "name_en": "Three of Pentacles",
+      "element": "土",
+      "keywords": "合作/技艺/团队/学习",
+      "upright_keywords": [
+        "合作",
+        "技艺",
+        "团队",
+        "学习",
+        "专业"
+      ],
+      "reversed_keywords": [
+        "缺乏合作",
+        "技艺不精",
+        "冲突",
+        "孤立",
+        "敷衍"
+      ],
+      "wuxing_mapping": "土",
+      "gua_mapping": "山风蛊"
+    },
+    {
+      "num": 4,
+      "suit": "星币",
+      "suit_en": "Pentacles",
+      "name": "星币四",
+      "name_en": "Four of Pentacles",
+      "element": "土",
+      "keywords": "守财/安全/控制/稳定",
+      "upright_keywords": [
+        "安全",
+        "稳定",
+        "储蓄",
+        "控制",
+        "保守"
+      ],
+      "reversed_keywords": [
+        "松开控制",
+        "慷慨",
+        "不稳定",
+        "贪婪",
+        "失去"
+      ],
+      "wuxing_mapping": "土",
+      "gua_mapping": "艮为山"
+    },
+    {
+      "num": 5,
+      "suit": "星币",
+      "suit_en": "Pentacles",
+      "name": "星币五",
+      "name_en": "Five of Pentacles",
+      "element": "土",
+      "keywords": "困难/匮乏/困境/寒冷",
+      "upright_keywords": [
+        "困难",
+        "匮乏",
+        "困境",
+        "被排斥",
+        "物质危机"
+      ],
+      "reversed_keywords": [
+        "恢复",
+        "援助到来",
+        "改善",
+        "精神富足",
+        "走出困境"
+      ],
+      "wuxing_mapping": "土",
+      "gua_mapping": "山地剥"
+    },
+    {
+      "num": 6,
+      "suit": "星币",
+      "suit_en": "Pentacles",
+      "name": "星币六",
+      "name_en": "Six of Pentacles",
+      "element": "土",
+      "keywords": "慷慨/给予/施受/平衡",
+      "upright_keywords": [
+        "慷慨",
+        "给予",
+        "施受平衡",
+        "慈善",
+        "公平"
+      ],
+      "reversed_keywords": [
+        "不平等",
+        "附带条件",
+        "债务",
+        "自私",
+        "施舍失衡"
+      ],
+      "wuxing_mapping": "土",
+      "gua_mapping": "风雷益"
+    },
+    {
+      "num": 7,
+      "suit": "星币",
+      "suit_en": "Pentacles",
+      "name": "星币七",
+      "name_en": "Seven of Pentacles",
+      "element": "土",
+      "keywords": "评估/耐心/等待收获/投入",
+      "upright_keywords": [
+        "评估",
+        "耐心",
+        "等待收获",
+        "投入",
+        "长远规划"
+      ],
+      "reversed_keywords": [
+        "缺乏耐心",
+        "白费功夫",
+        "短视",
+        "失望",
+        "放弃"
+      ],
+      "wuxing_mapping": "土",
+      "gua_mapping": "水天需"
+    },
+    {
+      "num": 8,
+      "suit": "星币",
+      "suit_en": "Pentacles",
+      "name": "星币八",
+      "name_en": "Eight of Pentacles",
+      "element": "土",
+      "keywords": "精进/工匠/专注/技能",
+      "upright_keywords": [
+        "精进",
+        "工匠精神",
+        "专注",
+        "技能提升",
+        "勤奋"
+      ],
+      "reversed_keywords": [
+        "敷衍",
+        "缺乏专注",
+        " perfectionism",
+        "重复无进步",
+        "野心不足"
+      ],
+      "wuxing_mapping": "土",
+      "gua_mapping": "风山渐"
+    },
+    {
+      "num": 9,
+      "suit": "星币",
+      "suit_en": "Pentacles",
+      "name": "星币九",
+      "name_en": "Nine of Pentacles",
+      "element": "土",
+      "keywords": "独立/丰足/自给自足/享受",
+      "upright_keywords": [
+        "独立",
+        "丰足",
+        "自给自足",
+        "享受",
+        "成就"
+      ],
+      "reversed_keywords": [
+        "依赖",
+        "财务损失",
+        "过度物质",
+        "虚假繁荣",
+        "不独立"
+      ],
+      "wuxing_mapping": "土",
+      "gua_mapping": "风天小畜"
+    },
+    {
+      "num": 10,
+      "suit": "星币",
+      "suit_en": "Pentacles",
+      "name": "星币十",
+      "name_en": "Ten of Pentacles",
+      "element": "土",
+      "keywords": "传承/家族/富裕/长久",
+      "upright_keywords": [
+        "传承",
+        "家族",
+        "富裕",
+        "长久",
+        "遗产"
+      ],
+      "reversed_keywords": [
+        "家庭纷争",
+        "失去遗产",
+        "财务损失",
+        "短视",
+        "无根"
+      ],
+      "wuxing_mapping": "土",
+      "gua_mapping": "地天泰"
+    },
+    {
+      "num": 11,
+      "suit": "星币",
+      "suit_en": "Pentacles",
+      "name": "星币侍从",
+      "name_en": "Page of Pentacles",
+      "element": "土",
+      "keywords": "学习/务实/新技能/起步",
+      "upright_keywords": [
+        "学习",
+        "务实",
+        "新技能",
+        "起步",
+        "勤奋"
+      ],
+      "reversed_keywords": [
+        "缺乏进展",
+        "不切实际",
+        "懒惰",
+        "拖延",
+        "缺乏专注"
+      ],
+      "wuxing_mapping": "土",
+      "gua_mapping": "山火贲"
+    },
+    {
+      "num": 12,
+      "suit": "星币",
+      "suit_en": "Pentacles",
+      "name": "星币骑士",
+      "name_en": "Knight of Pentacles",
+      "element": "土",
+      "keywords": "勤奋/可靠/稳健/坚持",
+      "upright_keywords": [
+        "勤奋",
+        "可靠",
+        "稳健",
+        "坚持",
+        "务实"
+      ],
+      "reversed_keywords": [
+        "停滞",
+        "固执",
+        "懒惰",
+        "缺乏野心",
+        "无聊"
+      ],
+      "wuxing_mapping": "土",
+      "gua_mapping": "火地晋"
+    },
+    {
+      "num": 13,
+      "suit": "星币",
+      "suit_en": "Pentacles",
+      "name": "星币王后",
+      "name_en": "Queen of Pentacles",
+      "element": "土",
+      "keywords": "滋养/务实/安全感/富足",
+      "upright_keywords": [
+        "滋养",
+        "务实",
+        "安全感",
+        "富足",
+        "关怀"
+      ],
+      "reversed_keywords": [
+        "工作与生活失衡",
+        "物质主义",
+        "忽视自我",
+        "过度担忧",
+        "不安全感"
+      ],
+      "wuxing_mapping": "土",
+      "gua_mapping": "地火明夷"
+    },
+    {
+      "num": 14,
+      "suit": "星币",
+      "suit_en": "Pentacles",
+      "name": "星币国王",
+      "name_en": "King of Pentacles",
+      "element": "土",
+      "keywords": "富足/成就/商业/稳健",
+      "upright_keywords": [
+        "富足",
+        "成就",
+        "商业才能",
+        "稳健",
+        "权威"
+      ],
+      "reversed_keywords": [
+        "贪婪",
+        "固执",
+        "物质主义",
+        "风险回避",
+        "控制欲"
+      ],
+      "wuxing_mapping": "土",
+      "gua_mapping": "火天大有"
+    }
+  ],
+  "reversal_probability": 0.5,
+  "spread_positions": {
+    "1": {
+      "name": "过去",
+      "name_en": "Past",
+      "role": "因",
+      "desc": "溯源/根源/已发生",
+      "interpretation": "代表过去的经历、因果根源，是当前状况的起因和背景"
+    },
+    "2": {
+      "name": "现在",
+      "name_en": "Present",
+      "role": "果",
+      "desc": "当前状态/核心",
+      "interpretation": "代表当下的核心状态、正在发生的事，是过去因果的显现"
+    },
+    "3": {
+      "name": "未来",
+      "name_en": "Future",
+      "role": "势",
+      "desc": "趋势/可能走向",
+      "interpretation": "代表未来的发展趋势、可能走向，是基于当前状态的延伸"
+    }
+  },
+  "wuxing_mapping_rules": {
+    "权杖_火": "木(行动力对应木的生长扩展)",
+    "圣杯_水": "水(情感对应水的流动包容)",
+    "宝剑_风": "金(决断对应金的锋利切割)",
+    "星币_土": "土(稳固对应土的承载滋养)",
+    "大阿尔卡那_火": "木",
+    "大阿尔卡那_水": "水",
+    "大阿尔卡那_风": "金",
+    "大阿尔卡那_土": "土"
+  },
+  "reversal_interpretation": {
+    "description": "逆位不是简单取反，而是多层次的含义转变",
+    "levels": {
+      "阻碍": "正向能量的阻碍或延迟",
+      "过度": "正向能量的过度表达",
+      "内在化": "外在能量转为内在体验",
+      "缺失": "正向能量的缺失或不足",
+      "反转": "完全相反的表现"
+    }
+  }
+}
