@@ -914,6 +914,7 @@ class MemorySystem:
                         res_score = engine.calculate(current_snapshot, m.label_snapshot)
                     else:
                         res_score = 1.0  # 无快照的记忆用中性分
+                    m._resonance_raw = res_score  # 原始共振分（供瞬时感知层使用）
                     m._resonance_boost = m.priority() * res_score
                 remaining.sort(
                     key=lambda m: getattr(m, '_resonance_boost', m.priority()),
@@ -930,6 +931,7 @@ class MemorySystem:
         for m in top:
             m.trigger_count += 1
             m.last_triggered = now
+        self._last_top_memories = top  # 供瞬时感知层读取共振分
         self._save_memories()
 
         return self._format_memory_list(top)
