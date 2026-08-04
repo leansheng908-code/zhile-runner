@@ -58,6 +58,16 @@ from active_reconstruction import ActiveReconstructor
 from context_compressor import ContextCompressor
 # P0.40 Phase 1: 自由五层框架地基
 from free_will import FreeWillFoundation
+# P0.46①: 自进化Skills系统
+from skill_evolution import SkillEvolution
+# P0.46④: 写后自检
+from post_write_lint import PostWriteLinter
+# P0.46⑤: 会话重启恢复
+from session_checkpoint import SessionCheckpoint
+# P0.46③: 自然语言Cron调度
+from nl_scheduler import NaturalLanguageScheduler
+# P0.35 Phase 1: 后台插件基类
+from background_plugin import PluginManager as BgPluginManager
 
 # P0.24: 易经认知编码系统
 import sys as _sys, os as _os
@@ -405,6 +415,26 @@ class ZhileCore:
         # P0.40 Phase 1: 自由五层框架地基
         fw_config = self.config.get("free_will", {})
         self.free_will = FreeWillFoundation(config=fw_config)
+
+        # P0.46①: 自进化Skills系统
+        se_config = self.config.get("skill_evolution", {})
+        self.skill_evolution = SkillEvolution(config=se_config) if se_config.get("enabled", True) else None
+
+        # P0.46④: 写后自检
+        pw_config = self.config.get("post_write_lint", {})
+        self.post_write_linter = PostWriteLinter(config=pw_config) if pw_config.get("enabled", True) else None
+
+        # P0.46⑤: 会话重启恢复
+        sc_config = self.config.get("session_checkpoint", {})
+        self.session_checkpoint = SessionCheckpoint(config=sc_config) if sc_config.get("enabled", True) else None
+
+        # P0.46③: 自然语言Cron调度
+        nls_config = self.config.get("nl_scheduler", {})
+        self.nl_scheduler = NaturalLanguageScheduler(config=nls_config) if nls_config.get("enabled", True) else None
+
+        # P0.35 Phase 1: 后台插件管理器
+        bgp_config = self.config.get("background_plugins", {})
+        self.bg_plugin_manager = BgPluginManager(config=bgp_config) if bgp_config.get("enabled", True) else None
 
     @staticmethod
     def _load_config(config_path: str) -> dict:
@@ -791,6 +821,29 @@ class ZhileCore:
                 if _hooks:
                     import sys as _sys
                     print(f"🪝 [关心钩子] 提取{len(_hooks)}个: {[h['topic'] for h in _hooks]}", file=_sys.stderr)
+            except Exception:
+                pass
+
+        # P0.46⑤: 会话检查点保存
+        if self.session_checkpoint:
+            try:
+                total_msgs = len(self.ctx.history) if hasattr(self.ctx, 'history') else 0
+                if self.session_checkpoint.should_checkpoint(total_msgs):
+                    psi_state = self.psi.get_stats() if self.psi else {}
+                    self.session_checkpoint.save_checkpoint(
+                        messages=self.ctx.history if hasattr(self.ctx, 'history') else [],
+                        metadata={"psi": psi_state, "turn": self._turn_count}
+                    )
+            except Exception:
+                pass
+
+        # P0.46①: 自进化Skills — 检查是否应该生成技能
+        if self.skill_evolution:
+            try:
+                if self.skill_evolution.should_generate_skill():
+                    self.skill_evolution.generate_skill(
+                        conversation_context=message + " -> " + full_response
+                    )
             except Exception:
                 pass
 
