@@ -91,17 +91,15 @@ class CLI:
             self.psi.on_user_message(user_input)
             self.ctx.set_psi_context(self.psi.get_context())
 
-        # P0.24: 卦象系统更新 + 自我感知生成
+        # P0.24: 卦象系统更新 + 自我感知生成（与QQ模式统一，时间起卦）
         if self.core and self.core.hexagram_tracker and self.core.hexagram_enabled:
-            psi_values = self.core._get_psi_for_hexagram()
-            if psi_values:
-                self.core._hex_state = self.core.hexagram_tracker.update(psi_values)
-                if self.core.hexagram_expression:
-                    perception = self.core.hexagram_expression.generate(self.core._hex_state)
-                    self.ctx.set_hexagram_context(perception)
-                if observer:
-                    observer.record_hexagram(
-                        self.core._hex_state, self.core.hexagram_expression)
+            self.core._hex_state = self.core.hexagram_tracker.update_by_time()
+            if self.core.hexagram_expression:
+                perception = self.core.hexagram_expression.generate(self.core._hex_state)
+                self.ctx.set_hexagram_context(perception)
+            if observer:
+                observer.record_hexagram(
+                    self.core._hex_state, self.core.hexagram_expression)
 
         # P0.8: 动态记忆检索 — 根据用户消息召回相关记忆
         mem_config = self.config.get("memory", {})
