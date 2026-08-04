@@ -23,6 +23,7 @@
 
 import json
 import hashlib
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
@@ -142,6 +143,41 @@ class Memory:
         return self.priority() * factor
 
 
+class MemoryResult:
+    """P0.39 Phase 3: 三层检索统一结果
+
+    将 Episodic 层和 Semantic 层的检索结果统一封装，
+    便于综合排序和来源追踪。
+
+    属性:
+        memory: 原始 Memory 对象
+        score: 综合评分（相关度 × 时间衰减）
+        source: 来源层 ``"episodic" | "semantic"``
+        topic: 来源主题名称（仅 Semantic 层结果有值）
+    """
+
+    def __init__(self, memory: Memory, score: float, source: str,
+                 topic: str = None):
+        self.memory = memory
+        self.score = score
+        self.source = source  # "episodic" | "semantic"
+        self.topic = topic    # 来源主题（仅 semantic 层）
+
+    def to_dict(self) -> dict:
+        """转为字典表示"""
+        return {
+            "memory": self.memory.to_dict(),
+            "score": round(self.score, 4),
+            "source": self.source,
+            "topic": self.topic,
+        }
+
+    def __repr__(self) -> str:
+        topic_str = f", topic={self.topic}" if self.topic else ""
+        return (f"MemoryResult(source={self.source}, score={self.score:.3f}"
+                f"{topic_str})")
+
+
 class MemorySystem:
     """记忆系统主控制器 — 五维+实体图"""
 
@@ -158,6 +194,14 @@ class MemorySystem:
 
         self.memories: List[Memory] = self._load_memories()
         self.session_history: List[Dict] = self._load_session()
+
+        # P0.39 Phase 3: Topic 记忆层（可选，可通过 config 关闭）
+        self.topic_enabled = True
+        self.topic_file = self.memory_dir / "topics.json"
+        self.topic_store: Dict[str, dict] = self._load_topics()
+        # 为旧记忆自动补充 topic 标签
+        if self.topic_enabled:
+            self._backfill_topic_tags()
 
     # ─── 持久化 ───────────────────────────────
 
@@ -185,6 +229,61 @@ class MemorySystem:
             return data.get("messages", [])[-60:]
         except (json.JSONDecodeError, TypeError):
             return []
+
+    def _load_topics(self) -> Dict[str, dict]:
+        """P0.39 Phase 3: 加载主题存储"""
+        if not self.topic_file.exists():
+            return {}
+        try:
+            with open(self.topic_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+    def _save_topics(self):
+        """P0.39 Phase 3: 保存主题存储"""
+        with open(self.topic_file, "w", encoding="utf-8") as f:
+            json.dump(self.topic_store, f, ensure_ascii=False, indent=2)
+
+    def _backfill_topic_tags(self):
+        """P0.39 Phase 3: 为旧记忆自动补充 topic 标签（向后兼容）
+
+        遍历所有没有 tags 的记忆，自动提取主题关键词并关联到 topic_store。
+        只在首次加载时执行一次，不会重复处理已有 tags 的记忆。
+        """
+        if not self.topic_enabled:
+            return
+
+        updated_memories = False
+        updated_topics = False
+
+        for mem in self.memories:
+            if not mem.tags:
+                topic = self.auto_extract_topic(mem)
+                if topic:
+                    mem.tags = [topic]
+                    updated_memories = True
+
+                    # 同时添加到 topic_store
+                    if topic not in self.topic_store:
+                        self.topic_store[topic] = {
+                            "summary": f"自动提取主题: {topic}",
+                            "related_memories": [mem.id],
+                            "last_updated": datetime.now().isoformat(),
+                        }
+                        updated_topics = True
+                    elif mem.id not in self.topic_store[topic].get(
+                            "related_memories", []):
+                        self.topic_store[topic]["related_memories"].append(
+                            mem.id)
+                        self.topic_store[topic]["last_updated"] = \
+                            datetime.now().isoformat()
+                        updated_topics = True
+
+        if updated_memories:
+            self._save_memories()
+        if updated_topics:
+            self._save_topics()
 
     def _save_memories(self):
         data = [m.to_dict() for m in self.memories]
@@ -343,6 +442,206 @@ class MemorySystem:
         except (json.JSONDecodeError, KeyError, TypeError, Exception):
             return [], []
 
+    # ─── P0.39 Phase 3: Topic 记忆层 ──────────
+
+    def add_topic(self, topic_name: str, summary: str,
+                  memory_ids: List[str]) -> bool:
+        """添加或更新主题
+
+        参数:
+            topic_name: 主题名称
+            summary: 主题摘要描述
+            memory_ids: 相关记忆 ID 列表
+
+        返回:
+            ``True`` 表示新建主题，``False`` 表示更新已有主题
+        """
+        is_new = topic_name not in self.topic_store
+        existing_ids = set()
+        if not is_new:
+            existing_ids = set(
+                self.topic_store[topic_name].get("related_memories", []))
+
+        self.topic_store[topic_name] = {
+            "summary": summary,
+            "related_memories": list(existing_ids | set(memory_ids)),
+            "last_updated": datetime.now().isoformat(),
+        }
+        self._save_topics()
+        return is_new
+
+    def get_topic(self, topic_name: str) -> Optional[dict]:
+        """获取主题信息
+
+        参数:
+            topic_name: 主题名称
+
+        返回:
+            ``{summary, related_memories, last_updated}`` 或 ``None``
+        """
+        return self.topic_store.get(topic_name)
+
+    def search_topics(self, keyword: str) -> List[dict]:
+        """搜索相关主题
+
+        在主题名称和摘要中匹配关键词。
+
+        参数:
+            keyword: 搜索关键词
+
+        返回:
+            匹配的主题列表，每项为
+            ``{name, summary, related_memories, last_updated}``
+        """
+        if not keyword:
+            return []
+        keyword_lower = keyword.lower()
+        results = []
+        for name, info in self.topic_store.items():
+            if (keyword_lower in name.lower() or
+                    keyword_lower in info.get("summary", "").lower()):
+                results.append({"name": name, **info})
+        return results
+
+    def list_topics(self) -> List[str]:
+        """列出所有主题名称
+
+        返回:
+            主题名称列表
+        """
+        return list(self.topic_store.keys())
+
+    def auto_extract_topic(self, memory: Memory) -> Optional[str]:
+        """从记忆中自动提取主题关键词
+
+        提取优先级：
+        1. 记忆的 ``tags``（如果存在）
+        2. ``dimension`` + ``category`` 组合推断
+
+        参数:
+            memory: 记忆对象
+
+        返回:
+            主题名称字符串，无法提取时返回 ``None``
+        """
+        # 优先使用 tags
+        if memory.tags:
+            return memory.tags[0]
+
+        # 退化：从 dimension + category 推断
+        dim_map = {
+            "fact": "事实", "recent": "近期",
+            "reflection": "反思", "persona": "人格",
+        }
+        cat_map = {
+            "fact": "事实", "preference": "偏好", "event": "事件",
+            "promise": "约定", "emotion": "情感", "insight": "洞察",
+            "growth": "成长", "general": "其他",
+        }
+        dim_name = dim_map.get(memory.dimension, memory.dimension)
+        cat_name = cat_map.get(memory.category, memory.category)
+
+        if dim_name != cat_name:
+            return f"{dim_name}-{cat_name}"
+        return dim_name
+
+    def retrieve_three_layer(
+        self, query: str, max_results: int = 5
+    ) -> List["MemoryResult"]:
+        """三层记忆检索接口
+
+        P0.39 Phase 3: 统一 Episodic + Semantic 两层检索，
+        按相关度和时间衰减综合排序。
+
+        - **Episodic 层**: 基于内容的记忆检索（关键词/Cue/Tag 匹配）
+        - **Semantic 层**: 从 ``topic_store`` 检索相关主题下的记忆
+        - **综合排序**: 按相关度 × 优先级（含时间衰减）合并
+
+        参数:
+            query: 查询文本
+            max_results: 最大返回数量
+
+        返回:
+            ``MemoryResult`` 列表，按综合评分降序排列
+        """
+        results: List[MemoryResult] = []
+        seen_ids: set = set()
+
+        # 查询分词（处理中英文混排边界）
+        query_lower = query.lower()
+        # 在 CJK-ASCII 边界插入空格，使 "Python编程" → "python 编程"
+        query_lower = re.sub(
+            r'([\u4e00-\u9fff])([a-zA-Z0-9])', r'\1 \2', query_lower)
+        query_lower = re.sub(
+            r'([a-zA-Z0-9])([\u4e00-\u9fff])', r'\1 \2', query_lower)
+        query_tokens = set(
+            t for t in re.split(r'[，。！？\s,\.!?;:、]+', query_lower)
+            if len(t) >= 2
+        )
+
+        # ── Layer 1: Episodic — 基于内容的记忆检索 ──
+        for mem in self.memories:
+            if mem.should_archive() or mem.id in seen_ids:
+                continue
+
+            content_lower = mem.content.lower()
+            mem_cues = set(c.lower() for c in (mem.cues or []))
+            mem_tags = set(t.lower() for t in (mem.tags or []))
+
+            # 计算匹配分
+            match_score = 0.0
+            # 内容匹配
+            content_hits = sum(
+                1 for token in query_tokens if token in content_lower)
+            match_score += content_hits * 0.3
+            # Cue 匹配
+            cue_hits = len(query_tokens & mem_cues)
+            match_score += cue_hits * 0.5
+            # Tag 匹配
+            tag_hits = len(query_tokens & mem_tags)
+            match_score += tag_hits * 0.4
+
+            if match_score > 0:
+                # 综合分 = 匹配分 × 优先级（含时间衰减）
+                combined = match_score * mem.priority()
+                results.append(MemoryResult(mem, combined, "episodic"))
+                seen_ids.add(mem.id)
+
+        # ── Layer 2: Semantic — 从 topic_store 检索 ──
+        if self.topic_enabled and self.topic_store:
+            for topic_name, topic_info in self.topic_store.items():
+                topic_lower = topic_name.lower()
+                summary_lower = topic_info.get("summary", "").lower()
+
+                # 主题名/摘要与 query 的匹配度
+                topic_match = 0.0
+                for token in query_tokens:
+                    if token in topic_lower or token in summary_lower:
+                        topic_match += 0.5
+
+                if topic_match > 0:
+                    related_ids = topic_info.get("related_memories", [])
+                    for mem in self.memories:
+                        if (mem.id in related_ids and
+                                mem.id not in seen_ids and
+                                not mem.should_archive()):
+                            combined = topic_match * mem.priority() * 0.8
+                            results.append(MemoryResult(
+                                mem, combined, "semantic", topic_name))
+                            seen_ids.add(mem.id)
+
+        # 综合排序
+        results.sort(key=lambda r: r.score, reverse=True)
+
+        # 触发记录
+        now = datetime.now().isoformat()
+        for r in results[:max_results]:
+            r.memory.trigger_count += 1
+            r.memory.last_triggered = now
+        self._save_memories()
+
+        return results[:max_results]
+
     # ─── 记忆管理 ─────────────────────────────
 
     def add_memory(self, content: str, category: str = "general",
@@ -389,6 +688,23 @@ class MemorySystem:
                      cues=cues, tags=tags)
         self.memories.append(mem)
         self._save_memories()
+
+        # P0.39 Phase 3: 自动提取 topic 并关联到 topic_store
+        if self.topic_enabled:
+            topic = self.auto_extract_topic(mem)
+            if topic:
+                if topic not in self.topic_store:
+                    self.topic_store[topic] = {
+                        "summary": f"自动提取主题: {topic}",
+                        "related_memories": [mem.id],
+                        "last_updated": datetime.now().isoformat(),
+                    }
+                elif mem.id not in self.topic_store[topic].get(
+                        "related_memories", []):
+                    self.topic_store[topic]["related_memories"].append(mem.id)
+                    self.topic_store[topic]["last_updated"] = \
+                        datetime.now().isoformat()
+                self._save_topics()
 
         # 关联到实体图
         if self.entity_graph and entity_ids:
