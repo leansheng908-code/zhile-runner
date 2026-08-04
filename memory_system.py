@@ -59,7 +59,8 @@ class Memory:
                  dimension: str = "recent", entity_ids: List[str] = None,
                  memory_id: str = None,
                  hexagram_binary: str = None, hu_binary: str = None,
-                 label_snapshot: dict = None):
+                 label_snapshot: dict = None,
+                 cues: List[str] = None, tags: List[str] = None):
         self.content = content
         self.category = category
         self.importance = max(1, min(10, importance))
@@ -74,6 +75,9 @@ class Memory:
         self.hu_binary = hu_binary  # 存入时的互卦6位编码
         # P0.42: 多策略共振快照（13系统精简标签向量）
         self.label_snapshot = label_snapshot  # {system_name: {key: value}}
+        # P0.39: Cue-Tag-Content 三层关联图
+        self.cues = cues or []   # 细粒度关键词（3-5个）
+        self.tags = tags or []   # 语义标签桥梁（1-2个，≤2词）
 
     @staticmethod
     def _make_id(content: str, created_at: str) -> str:
@@ -94,6 +98,8 @@ class Memory:
             "hexagram_binary": self.hexagram_binary,
             "hu_binary": self.hu_binary,
             "label_snapshot": self.label_snapshot,
+            "cues": self.cues,
+            "tags": self.tags,
         }
 
     @classmethod
@@ -109,6 +115,8 @@ class Memory:
             hexagram_binary=d.get("hexagram_binary"),
             hu_binary=d.get("hu_binary"),
             label_snapshot=d.get("label_snapshot"),
+            cues=d.get("cues", []),
+            tags=d.get("tags", []),
         )
 
     def should_archive(self) -> bool:
@@ -289,6 +297,52 @@ class MemorySystem:
 
         return "\n".join(parts)
 
+    # ─── P0.39: Cue-Tag提取 ──────────────────
+
+    def extract_cues_tags(self, content: str) -> Tuple[List[str], List[str]]:
+        """P0.39: 用LLM从记忆内容中提取Cue和Tag
+
+        Cue: 3-5个细粒度关键词，用于精确检索匹配
+        Tag: 1-2个语义标签（≤2词），作为Cue→Content的桥梁
+        """
+        if not self.llm or len(content.strip()) < 5:
+            return [], []
+
+        prompt = f"""从以下记忆内容中提取检索关键词和语义标签。
+
+记忆内容：{content[:500]}
+
+提取规则：
+1. 提取3-5个细粒度关键词作为Cue，用于精确匹配
+   - 应是内容中的具体实体、概念或术语
+   - 避免泛化词（如"事情"、"东西"等）
+2. 提取1-2个语义标签作为Tag，每个标签不超过2个词
+   - 应是概括性的语义类别（如"编程经验"、"项目记录"、"个人偏好"）
+
+以JSON格式返回：
+{{"cues": ["关键词1", "关键词2", ...], "tags": ["标签1", "标签2"]}}
+
+只返回JSON。"""
+
+        messages = [
+            {"role": "system", "content": "你是记忆标注助手，只输出JSON。"},
+            {"role": "user", "content": prompt},
+        ]
+
+        try:
+            result = ""
+            for chunk in self.llm.chat(messages, stream=True):
+                result += chunk
+            result = result.strip()
+            if "```json" in result:
+                result = result.split("```json")[1].split("```")[0]
+            elif "```" in result:
+                result = result.split("```")[1].split("```")[0]
+            data = json.loads(result)
+            return data.get("cues", []), data.get("tags", [])
+        except (json.JSONDecodeError, KeyError, TypeError, Exception):
+            return [], []
+
     # ─── 记忆管理 ─────────────────────────────
 
     def add_memory(self, content: str, category: str = "general",
@@ -296,11 +350,19 @@ class MemorySystem:
                    entity_ids: List[str] = None,
                    hexagram_binary: str = None,
                    hu_binary: str = None,
-                   label_snapshot: dict = None) -> bool:
-        """添加一条记忆，已存在则更新触发"""
+                   label_snapshot: dict = None,
+                   cues: List[str] = None,
+                   tags: List[str] = None) -> bool:
+        """添加一条记忆，已存在则更新触发
+        P0.39: 自动提取Cue和Tag（如果未提供且有LLM）
+        """
         content = content.strip()
         if not content:
             return False
+
+        # P0.39: 未提供cues/tags时自动提取
+        if cues is None and tags is None and self.llm:
+            cues, tags = self.extract_cues_tags(content)
 
         for m in self.memories:
             if m.content == content:
@@ -311,6 +373,11 @@ class MemorySystem:
                     for eid in entity_ids:
                         if eid not in m.entity_ids:
                             m.entity_ids.append(eid)
+                # P0.39: 补充cues/tags如果旧记忆缺失
+                if cues and not m.cues:
+                    m.cues = cues
+                if tags and not m.tags:
+                    m.tags = tags
                 self._save_memories()
                 return False  # 已存在
 
@@ -318,7 +385,8 @@ class MemorySystem:
                      entity_ids=entity_ids,
                      hexagram_binary=hexagram_binary,
                      hu_binary=hu_binary,
-                     label_snapshot=label_snapshot)
+                     label_snapshot=label_snapshot,
+                     cues=cues, tags=tags)
         self.memories.append(mem)
         self._save_memories()
 
@@ -584,8 +652,12 @@ class MemorySystem:
 - reflection: 从对话中产生的洞察或反思
 - persona: 知乐自己的人格变化或成长
 
+P0.39 Cue-Tag标注：
+- cues: 3-5个细粒度关键词，用于检索匹配（具体实体/概念/术语）
+- tags: 1-2个语义标签，每个不超过2个词（概括性类别）
+
 以JSON格式返回：
-{{"memories": [{{"content": "...", "category": "fact|preference|event|promise|emotion|insight|growth|general", "importance": 1-10, "dimension": "fact|recent|reflection|persona"}}]}}
+{{"memories": [{{"content": "...", "category": "fact|preference|event|promise|emotion|insight|growth|general", "importance": 1-10, "dimension": "fact|recent|reflection|persona", "cues": ["关键词1", "关键词2"], "tags": ["标签1"]}}]}}
 
 只返回JSON，不要其他文字。"""
 
@@ -626,6 +698,8 @@ class MemorySystem:
                     hexagram_binary=hexagram_binary,
                     hu_binary=hu_binary,
                     label_snapshot=label_snapshot,
+                    cues=m.get("cues"),
+                    tags=m.get("tags"),
                 ):
                     count += 1
                     # 记录新记忆ID用于实体关联
