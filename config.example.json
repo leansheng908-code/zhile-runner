@@ -191,5 +191,22 @@
     "num_results": 5,
     "proxy": "",
     "timeout": 12
+  },
+  "personal": {
+    "birth_year": null,
+    "birth_month": null,
+    "birth_day": null,
+    "birth_hour": null,
+    "gender": null
+  },
+  "ammo": {
+    "enabled": true,
+    "cache_path": "data/ammo_library.json",
+    "preseed_on_init": true,
+    "llm": {
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key": "YOUR_API_KEY_HERE",
+      "model": "deepseek-chat"
+    }
   }
 }
