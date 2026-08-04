@@ -302,7 +302,7 @@ def generate_labels_from_timestamp(year, month, day, hour=12, minute=0):
     next_window_str = '未知'
     if seg['next_segment_type']:
         nw = _WINDOW_TYPES.get(seg['next_segment_type'], '未知')
-        next_window_str = str(nw) + '(' + str(end_year) + ')' + '年起'
+        next_window_str = str(nw) + '(' + str(end_year) + '年起)'
     L5 = {
         "窗口类型": window_type,
         "窗口阶段": stage,
