@@ -598,7 +598,8 @@ class ZhileCore:
             try:
                 if use_resonance and relevant:
                     hex_info = self._hex_state.get("current", {}) if self._hex_state else None
-                    fm_result = self.fleeting_moment.generate(relevant, hexagram_info=hex_info)
+                    fm_result = self.fleeting_moment.generate(
+                        getattr(self.memory, '_last_top_memories', []), hexagram_info=hex_info)
                     if fm_result:
                         self.ctx.set_fleeting_moment(fm_result['descriptor'])
             except (NameError, Exception):
