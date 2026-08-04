@@ -23,7 +23,7 @@ class ContextAssembler:
                  memory_context: str = "", psi_context: str = "",
                  arc_light_context: str = "", somatic_context: str = "",
                  feedback_hints: str = "", hexagram_context: str = "",
-                 plugin_context: str = ""):
+                 plugin_context: str = "", fleeting_moment_context: str = ""):
         self.system_prompt = system_prompt
         self.max_history = max_history
         self.memory_context = memory_context
@@ -33,6 +33,7 @@ class ContextAssembler:
         self.feedback_hints = feedback_hints
         self.hexagram_context = hexagram_context
         self.plugin_context = plugin_context
+        self.fleeting_moment_context = fleeting_moment_context
         self.history: List[Dict[str, str]] = []
 
     def set_memory_context(self, memory_context: str):
@@ -56,6 +57,14 @@ class ContextAssembler:
 
     def set_plugin_context(self, plugin_context: str):
         self.plugin_context = plugin_context
+
+    def set_fleeting_moment(self, ctx: str):
+        """设置瞬时感知上下文（一期一会，回复后清空）"""
+        self.fleeting_moment_context = ctx
+
+    def clear_fleeting_moment(self):
+        """清空瞬时感知上下文"""
+        self.fleeting_moment_context = ""
 
     def add_user_message(self, content: str):
         self.history.append({"role": "user", "content": content})
@@ -134,6 +143,12 @@ class ContextAssembler:
                 "自然影响你的语气和节奏，但不要向主人解释或分析自己的状态。"
             )
 
+        if self.fleeting_moment_context:
+            prompt += (
+                "\n\n---\n"
+                + self.fleeting_moment_context
+            )
+
         if self.plugin_context:
             prompt += (
                 "\n\n---\n"
@@ -170,4 +185,5 @@ class ContextAssembler:
             "has_somatic": bool(self.somatic_context),
             "has_feedback": bool(self.feedback_hints),
             "has_hexagram": bool(self.hexagram_context),
+            "has_fleeting_moment": bool(self.fleeting_moment_context),
         }
