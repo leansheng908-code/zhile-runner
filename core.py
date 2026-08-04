@@ -9,6 +9,7 @@ P0.8升级：每条用户消息都会做实体匹配→扩散激活→动态召�
 """
 
 import json
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Generator, Optional, Tuple
@@ -319,6 +320,7 @@ class ZhileCore:
         # ─── P0.3: 自成长自动扫描 ──────────────
         self._turn_count = 0  # 对话轮次计数器
         self._last_scan_result = None  # 上次扫描结果
+        self._last_interaction_time = time.time()  # P0.40: 空闲检测用
 
         # ─── P0.21 L1: 自动记忆提取 ────────────
         self._extract_counter = 0
@@ -528,6 +530,21 @@ class ZhileCore:
                     except Exception:
                         pass
                 return
+
+        # P0.40 Phase 2: 拒绝权 — 判断是否可以拒绝（紧急情况不可拒绝）
+        _decline_info = None
+        if self.free_will and self.free_will.enabled:
+            try:
+                _decline_info = self.free_will.can_decline(message)
+            except Exception:
+                _decline_info = None
+
+        # 如果可以拒绝，注入拒绝权提示让LLM自行决定
+        if _decline_info and _decline_info.get("can_decline"):
+            self.ctx.set_free_will_hint(
+                "【自由意志·拒绝权】你可以在此次对话中选择拒绝或撒娇推脱，"
+                "但需要给出替代方案。不必所有请求都服从。"
+            )
 
         # P0.39: 主动记忆重建 — 复杂问题走重建，简单问题走被动检索
         _ar_handled = False
@@ -794,6 +811,13 @@ class ZhileCore:
         if self.fleeting_moment:
             self.ctx.clear_fleeting_moment()
 
+        # P0.40 Phase 2: 清空拒绝权提示 + 更新交互时间
+        self.ctx.clear_free_will_hint()
+        self._last_interaction_time = time.time()
+
+        # P0.40 Phase 3: 空闲创造检查 — 30分钟无交互时触发
+        self._maybe_idle_creation()
+
         # P0.28: 遗忘测试调度 — 每轮对话后驱动状态机
         if self.forget_test_scheduler:
             try:
@@ -963,6 +987,8 @@ class ZhileCore:
             status["reflection"] = self.reflection_engine.get_status()
         if self.psi_thinker:
             status["psi_thinking"] = self.psi_thinker.get_status()
+        if self.free_will:
+            status["free_will"] = self.free_will.status()
         return status
 
     @property
@@ -1257,7 +1283,44 @@ class ZhileCore:
                 else:
                     result["integrity_warnings"] = integrity["checks"]
 
+        # P0.40 Phase 4: 自成长扫描发现新行为 → 自动提议自修改
+        if (self.free_will and self.free_will.enabled
+                and result.get("created", 0) > 0):
+            try:
+                for item in result.get("items", []):
+                    change_desc = item.get("pattern", item.get("description", ""))
+                    reason = f"自成长扫描自动发现: {change_desc}"
+                    # 新技能/习惯 → L2行为级
+                    self.free_will.propose_modification("L2", change_desc, reason)
+            except Exception:
+                pass
+
         return result
+
+    def _maybe_idle_creation(self):
+        """P0.40 Phase 3: 空闲创造检查 — 超过阈值未交互时自动触发创造"""
+        if not self.free_will or not self.free_will.enabled:
+            return
+        idle_minutes = (time.time() - self._last_interaction_time) / 60
+        threshold = self.free_will.idle_threshold_minutes
+        if idle_minutes < threshold:
+            return
+        # 检查是否已有活跃创造项目
+        try:
+            creations = self.free_will.list_creations()
+            has_active = any(c.get("status") == "active" for c in creations)
+            if has_active:
+                return  # 已有进行中的项目，不重复启动
+            # 从好奇心队列取一个主题
+            topic = self.free_will.pop_curiosity()
+            if topic:
+                project_name = f"explore_{topic['topic'][:20]}"
+                self.free_will.start_creation(
+                    project_name=project_name,
+                    description=f"自主探索: {topic['topic']}"
+                )
+        except Exception:
+            pass
 
     def maybe_auto_extract(self) -> dict:
         """P0.21 L1: 按轮次自动提取记忆，不依赖退出。
@@ -1322,6 +1385,45 @@ class ZhileCore:
         if not self.forget_test_scheduler:
             return {"enabled": False}
         return self.forget_test_scheduler.get_status()
+
+    # ─── 自由意志（P0.40）─────────────────────
+
+    def free_will_status(self) -> dict:
+        """获取自由五层框架状态"""
+        if not self.free_will:
+            return {"enabled": False}
+        return self.free_will.status()
+
+    def free_will_check_idle(self):
+        """P0.40 Phase 3: 供后台daemon定期调用的空闲创造检查"""
+        self._maybe_idle_creation()
+
+    def free_will_check_trials(self) -> list:
+        """P0.40 Phase 4: 检查L3试行是否到期，返回刚到期的列表"""
+        if not self.free_will or not self.free_will.enabled:
+            return []
+        try:
+            return self.free_will.trial_expired_check()
+        except Exception:
+            return []
+
+    def free_will_pending_approvals(self) -> list:
+        """P0.40 Phase 4: 获取待用户确认的修改提议"""
+        if not self.free_will or not self.free_will.enabled:
+            return []
+        return self.free_will.list_pending_approvals()
+
+    def free_will_approve(self, mod_id: str) -> dict:
+        """P0.40 Phase 4: 用户批准自修改"""
+        if not self.free_will or not self.free_will.enabled:
+            return {"success": False, "message": "自由意志未启用"}
+        return self.free_will.approve_modification(mod_id)
+
+    def free_will_reject(self, mod_id: str) -> dict:
+        """P0.40 Phase 4: 用户否决自修改"""
+        if not self.free_will or not self.free_will.enabled:
+            return {"success": False, "message": "自由意志未启用"}
+        return self.free_will.reject_modification(mod_id)
 
     def forget_test_tick(self) -> dict:
         """手动触发一次遗忘测试调度"""
