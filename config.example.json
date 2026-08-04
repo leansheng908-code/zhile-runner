@@ -14,7 +14,10 @@
   "context": {
     "max_history": 30,
     "inject_memory": true,
-    "memory_files": ["USER.md", "MEMORY.md"]
+    "memory_files": [
+      "USER.md",
+      "MEMORY.md"
+    ]
   },
   "memory": {
     "dir": "memory",
@@ -120,7 +123,10 @@
   },
   "reflection": {
     "enabled": true,
-    "schedule_hours": [3, 15],
+    "schedule_hours": [
+      3,
+      15
+    ],
     "max_daily_runs": 2
   },
   "psi_thinking": {
@@ -175,11 +181,19 @@
   },
   "news_push": {
     "enabled": true,
-    "push_times": [9, 16],
+    "push_times": [
+      9,
+      16
+    ],
     "check_interval": 600,
     "quiet_hours_start": 23,
     "quiet_hours_end": 7,
-    "topics": ["科技", "二次元", "奇闻异事", "历史"],
+    "topics": [
+      "科技",
+      "二次元",
+      "奇闻异事",
+      "历史"
+    ],
     "max_results_per_topic": 3,
     "user_prefs": "科技/历史/奇异/二次元，喜欢反差感",
     "proxy": "",
@@ -199,6 +213,29 @@
     "birth_hour": null,
     "gender": null
   },
+  "stocks": {
+    "enabled": true,
+    "watch_list": [
+      {
+        "code": "sh600664",
+        "name": "哈药股份",
+        "strategy": "2/7/9/10月周期低买高卖"
+      },
+      {
+        "code": "sh600350",
+        "name": "山东高速",
+        "cost": 11.425,
+        "target": 12.0
+      },
+      {
+        "code": "sh601169",
+        "name": "北京银行",
+        "strategy": "2028起大周期"
+      }
+    ],
+    "alert_enabled": true,
+    "check_interval": 1800
+  },
   "ammo": {
     "enabled": true,
     "cache_path": "data/ammo_library.json",
@@ -208,5 +245,19 @@
       "api_key": "YOUR_API_KEY_HERE",
       "model": "deepseek-chat"
     }
+  },
+  "context_compressor": {
+    "enabled": true,
+    "threshold": 40,
+    "protect_head": 6,
+    "protect_tail": 10,
+    "tool_output_max": 500,
+    "summary_max_tokens": 800
+  },
+  "free_will": {
+    "enabled": true,
+    "sandbox_dir": "sandbox",
+    "budget_ratio": 0.2,
+    "idle_threshold": 30
   }
 }
