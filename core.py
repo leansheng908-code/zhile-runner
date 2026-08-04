@@ -123,7 +123,7 @@ class ZhileCore:
         # ─── P0.24: 易经认知编码 ────────────────
         hex_config = self.config.get("hexagram", {})
         self.hexagram_enabled = (hex_config.get("enabled", True) 
-                                 and _HEXAGRAM_AVAILABLE and self.psi_enabled)
+                                 and _HEXAGRAM_AVAILABLE)
         self.hexagram_tracker = None
         self.hexagram_expression = None
         self._hex_state = None
@@ -404,26 +404,24 @@ class ZhileCore:
             self.psi.on_user_message(message)
             self.ctx.set_psi_context(self.psi.get_context())
 
-        # P0.24: 卦象系统更新 + 自我感知生成
+        # P0.42: 独立卦象系统 — 梅花易数时间起卦（不再依赖PSI）
         if self.hexagram_tracker and self.hexagram_enabled:
-            psi_values = self._get_psi_for_hexagram()
-            if psi_values:
-                self._hex_state = self.hexagram_tracker.update(psi_values)
-                if self.hexagram_expression:
-                    perception = self.hexagram_expression.generate(self._hex_state)
-                    self.ctx.set_hexagram_context(perception)
-                if self.observer:
-                    self.observer.record_hexagram(
-                        self._hex_state, self.hexagram_expression)
+            self._hex_state = self.hexagram_tracker.update_by_time()
+            if self.hexagram_expression:
+                perception = self.hexagram_expression.generate(self._hex_state)
+                self.ctx.set_hexagram_context(perception)
+            if self.observer:
+                self.observer.record_hexagram(
+                    self._hex_state, self.hexagram_expression)
 
-                # P0.25: 变卦事件通知记忆系统
-                if "bian" in self._hex_state and self.memory:
-                    p025_mem = self.config.get("hexagram", {}).get("memory", {})
-                    self.memory.boost_on_bian(
-                        self._hex_state["bian"],
-                        max_boost=p025_mem.get("bian_max_boost", 3),
-                        recent_count=p025_mem.get("bian_recent_count", 5),
-                    )
+            # P0.25: 卦象变化时通知记忆系统（仅hexagram_changed时boost）
+            if self._hex_state.get("hexagram_changed") and self.memory:
+                p025_mem = self.config.get("hexagram", {}).get("memory", {})
+                self.memory.boost_on_bian(
+                    self._hex_state["bian"],
+                    max_boost=p025_mem.get("bian_max_boost", 3),
+                    recent_count=p025_mem.get("bian_recent_count", 5),
+                )
 
         # P0.23: 认知路由层 — 尝试短路（0 token）
         if self.cognitive_router:
@@ -730,19 +728,6 @@ class ZhileCore:
         return "".join(self.chat(message))
 
     # ─── 状态 ─────────────────────────────────
-
-    def _get_psi_for_hexagram(self) -> dict:
-        """P0.24: 将PSI引擎需求映射为卦象系统所需格式"""
-        if not self.psi:
-            return None
-        n = self.psi.needs
-        return {
-            "belonging": n["relatedness"].level,    # 归属感 → 上爻
-            "emotion": n["energy"].level,            # 能量 → 二爻(情绪)
-            "autonomy": n["autonomy"].level,         # 自主性 → 三爻
-            "competence": n["competence"].level,     # 胜任感 → 四爻
-            "certainty": n["certainty"].level,       # 确定性 → 五爻
-        }
 
     def get_psi_stats(self) -> dict:
         if not self.psi:
