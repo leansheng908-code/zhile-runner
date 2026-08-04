@@ -65,13 +65,11 @@ class HexagramTracker:
     
     def update(self, psi_values, yao_threshold=3.0, vitality_threshold=12.5):
         """
-        更新卦象状态（每轮对话后调用）
-        
-        Returns:
-            dict: 当前卦象 + 变卦信息 + 策略
+        [已废弃] PSI驱动更新卦象状态 — P0.42后请用 update_by_time()
+        保留用于向后兼容和回退。
         """
         from psi_to_hexagram import psi_to_binary, compute_vitality
-        
+
         self.previous_binary = self.current_binary
         new_binary = psi_to_binary(psi_values, yao_threshold, vitality_threshold)
         self.current_binary = new_binary
@@ -109,6 +107,88 @@ class HexagramTracker:
         result["ti_yong"] = self._analyze_ti_yong(new_binary)
         
         return result
+
+    def update_by_time(self, dt=None):
+        """
+        P0.42: 独立卦象系统 — 梅花易数时间起卦
+        不再依赖PSI，直接从时间戳解压卦象。
+        
+        Args:
+            dt: datetime对象，默认now()
+        
+        Returns:
+            dict: 与update()同构，额外包含divination和moving_line信息
+        """
+        from yi_jing_label_dictionary import meihua_qigua
+        
+        if dt is None:
+            dt = datetime.now()
+        
+        self.previous_binary = self.current_binary
+        
+        # 梅花易数起卦
+        qi = meihua_qigua(dt)
+        new_binary = qi['binary']
+        moving_line = qi['moving_line']
+        
+        self.current_binary = new_binary
+        self.current_hexagram = self.binary_table.get(new_binary)
+        self.update_count += 1
+        
+        result = {
+            "current": self._get_hexagram_info(new_binary),
+            "divination": qi,
+        }
+        
+        # 变卦 = 动爻翻转（梅花易数法，变卦始终存在）
+        bian_binary = self._flip_yao(new_binary, moving_line)
+        yao_names = ["初爻", "二爻", "三爻", "四爻", "五爻", "上爻"]
+        result["bian"] = {
+            "moving_line": moving_line,
+            "changed_yao": [{
+                "position": yao_names[moving_line - 1],
+                "direction": "阳→阴" if new_binary[moving_line - 1] == "1" else "阴→阳",
+            }],
+            "changed_count": 1,
+            "from_hexagram": self._get_hexagram_info(new_binary),
+            "to_hexagram": self._get_hexagram_info(bian_binary),
+        }
+        
+        # 卦象是否发生变化（用于记忆系统判断是否boost）
+        result["hexagram_changed"] = (
+            self.previous_binary is not None 
+            and self.previous_binary != new_binary
+        )
+        if result["hexagram_changed"]:
+            self.history.append({
+                "turn": self.update_count,
+                "from": self.previous_binary,
+                "to": new_binary,
+                "from_name": self.binary_table.get(self.previous_binary, {}).get("name", "?"),
+                "to_name": self.current_hexagram["name"] if self.current_hexagram else "?",
+                "trigger": "time_change",
+            })
+        
+        # 互卦
+        result["hu"] = self._compute_hu(new_binary)
+        
+        # 策略
+        result["strategy"] = self._get_strategy(self.current_hexagram["num"])
+        
+        # 基线相位（保留十二消息卦在tracker中）
+        result["baseline"] = self._get_baseline_phase(dt)
+        
+        # 体用分析
+        result["ti_yong"] = self._analyze_ti_yong(new_binary)
+        
+        return result
+    
+    def _flip_yao(self, binary_str, line_num):
+        """翻转指定爻（1-6，从初爻到上爻）"""
+        bits = list(binary_str)
+        idx = line_num - 1
+        bits[idx] = "1" if bits[idx] == "0" else "0"
+        return "".join(bits)
     
     def _get_hexagram_info(self, binary_str):
         """获取卦象完整信息"""
