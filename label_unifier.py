@@ -327,13 +327,151 @@ def generate_memory_tags(dt: datetime = None, max_tags_per_system: int = 20) -> 
     }
 
 
+# ─── P0.43: 三管叠加 ──────────────────────────────────────
+
+def generate_unified_labels_with_personal(dt: datetime = None,
+                                           personal_config: dict = None,
+                                           conversation_text: str = None) -> dict:
+    """
+    三管叠加：10系统术数标签 + 出生命格 + 内容弹药库。
+
+    参数:
+        dt: datetime对象，默认当前时间
+        personal_config: personal配置段（含 birth_year/month/day/hour/gender），
+                         为 None 时跳过命格段
+        conversation_text: 对话文本，为 None 时跳过内容段
+
+    返回:
+        在原有 generate_unified_labels 结果基础上追加:
+        - systems 中增加 personal_destiny 和 ammo_content 两个系统段
+        - 若同时有天时五行和内容五行，顶层增加 resonance 字段
+    """
+    if dt is None:
+        dt = datetime.now()
+
+    # 1. 生成基础10系统标签
+    result = generate_unified_labels(dt)
+
+    time_wuxing = None
+
+    # 2. 提取天时五行（从八字系统的标签中查找日主五行）
+    for sys_data in result["systems"]:
+        if sys_data["system_id"] == "bazi" and not sys_data.get("error"):
+            for dim in sys_data["dimensions"]:
+                if dim["key"] == "L5_日主五行":
+                    time_wuxing = str(dim["value"])
+                    break
+            break
+
+    # 3. 追加 personal_destiny 段
+    if personal_config:
+        try:
+            from personal_destiny import PersonalDestiny
+            pd = PersonalDestiny.from_config(personal_config)
+            destiny = pd.get_current_destiny(dt)
+
+            pd_dims = []
+            for k, v in destiny.items():
+                if v is not None and v != "":
+                    pd_dims.append({"key": k, "value": v, "type": type(v).__name__, "layer": "命格"})
+
+            # 如果尚未提取到天时五行，用命格日主五行兜底
+            if not time_wuxing and destiny.get("day_master_wuxing"):
+                time_wuxing = destiny["day_master_wuxing"]
+
+            result["systems"].append({
+                "system_id": "personal_destiny",
+                "system_name": "出生命格",
+                "expected_dims": 15,
+                "actual_dims": len(pd_dims),
+                "dimensions": pd_dims
+            })
+            result["total_systems"] += 1
+            result["total_dimensions"] += len(pd_dims)
+        except Exception as e:
+            result["systems"].append({
+                "system_id": "personal_destiny",
+                "system_name": "出生命格",
+                "expected_dims": 15,
+                "actual_dims": 0,
+                "error": str(e),
+                "dimensions": []
+            })
+            result["total_systems"] += 1
+
+    # 4. 追加 ammo_content 段
+    content_wuxing_list = []
+    if conversation_text:
+        try:
+            from ammo_classifier import AmmoClassifier
+
+            # 从personal_config或全局环境获取LLM配置
+            llm_cfg = personal_config.get("llm", {}) if personal_config else {}
+            if not llm_cfg.get("api_key"):
+                llm_cfg = {
+                    "base_url": "https://api.deepseek.com/v1",
+                    "api_key": "",
+                    "model": "deepseek-chat",
+                }
+
+            ammo = AmmoClassifier(llm_cfg, cache_path=os.path.join(_BASE_DIR, "data", "ammo_library.json"))
+            tags = ammo.get_content_tags(conversation_text)
+
+            ammo_dims = []
+            for tag in tags:
+                for k, v in tag.items():
+                    if v is not None and v != "" and v != []:
+                        ammo_dims.append({
+                            "key": f"{tag['concept']}.{k}",
+                            "value": " | ".join(v) if isinstance(v, list) else v,
+                            "type": "str" if isinstance(v, list) else type(v).__name__,
+                            "layer": "内容弹药"
+                        })
+                # 收集内容五行
+                for wx in tag.get("wuxing", []):
+                    if wx not in content_wuxing_list:
+                        content_wuxing_list.append(wx)
+
+            result["systems"].append({
+                "system_id": "ammo_content",
+                "system_name": "内容弹药库",
+                "expected_dims": len(tags) * 4,
+                "actual_dims": len(ammo_dims),
+                "dimensions": ammo_dims
+            })
+            result["total_systems"] += 1
+            result["total_dimensions"] += len(ammo_dims)
+        except Exception as e:
+            result["systems"].append({
+                "system_id": "ammo_content",
+                "system_name": "内容弹药库",
+                "expected_dims": 0,
+                "actual_dims": 0,
+                "error": str(e),
+                "dimensions": []
+            })
+            result["total_systems"] += 1
+
+    # 5. 共振检测
+    if time_wuxing and content_wuxing_list:
+        try:
+            from ammo_classifier import AmmoClassifier
+            ammo = AmmoClassifier({}, cache_path=os.path.join(_BASE_DIR, "data", "ammo_library.json"))
+            resonance = ammo.detect_resonance(time_wuxing, content_wuxing_list)
+            result["resonance"] = resonance
+        except Exception:
+            pass
+
+    return result
+
+
 # ─── CLI入口 ───
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="统一术数标签生成器")
     parser.add_argument("--time", type=str, default=None, help="时间 YYYY-MM-DD HH:MM")
-    parser.add_argument("--mode", choices=["full", "compact", "memory"], default="compact",
-                       help="full=完整格式, compact=精简key-value, memory=记忆标签向量")
+    parser.add_argument("--mode", choices=["full", "compact", "memory", "personal"], default="compact",
+                       help="full=完整格式, compact=精简key-value, memory=记忆标签向量, personal=三管叠加")
     parser.add_argument("--system", type=str, default=None, help="只输出指定系统(如yi_jing)")
     args = parser.parse_args()
     
@@ -346,6 +484,19 @@ if __name__ == "__main__":
         result = generate_unified_labels(dt)
     elif args.mode == "memory":
         result = generate_memory_tags(dt)
+    elif args.mode == "personal":
+        # 三管叠加模式：尝试从 config.json 加载 personal 段
+        _cfg_path = os.path.join(_BASE_DIR, "config.json")
+        _personal_cfg = None
+        if os.path.exists(_cfg_path):
+            try:
+                import json as _json
+                with open(_cfg_path, "r", encoding="utf-8") as _f:
+                    _full_cfg = _json.load(_f)
+                _personal_cfg = _full_cfg.get("personal")
+            except Exception:
+                pass
+        result = generate_unified_labels_with_personal(dt, personal_config=_personal_cfg)
     else:
         result = generate_unified_labels_compact(dt)
     
