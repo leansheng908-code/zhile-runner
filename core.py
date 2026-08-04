@@ -460,32 +460,55 @@ class ZhileCore:
                         pass
                 return
 
-        # P0.8/P0.25: 动态记忆检索 — 卦象加权版
+        # P0.8/P0.25/P0.42: 动态记忆检索 — 多策略共振版
         mem_config = self.config.get("memory", {})
         if mem_config.get("dynamic_retrieval", True):
-            # P0.25 Phase 2: 使用卦象加权检索
-            hex_binary = None
-            hu_binary = None
-            if self._hex_state:
-                hex_binary = self._hex_state.get("current", {}).get("binary")
-                hu_binary = self._hex_state.get("hu", {}).get("binary")
+            # P0.42: 优先使用多策略共振检索
+            use_resonance = mem_config.get("use_resonance_engine", True)
+            current_snapshot = None
+            if use_resonance:
+                try:
+                    from resonance_engine import ResonanceEngine
+                    engine = ResonanceEngine()
+                    from datetime import datetime as _dt
+                    now = _dt.now()
+                    current_snapshot = engine.extract_compact_snapshot(
+                        engine.generate_snapshot(now.year, now.month, now.day, now.hour, now.minute)
+                    )
+                    relevant = self.memory.get_relevant_memories_with_resonance(
+                        message,
+                        current_snapshot=current_snapshot,
+                        max_memories=mem_config.get("max_inject", 15),
+                    )
+                    self.ctx.set_memory_context(relevant)
+                    if self.observer:
+                        self.observer.record_memory(relevant)
+                except Exception:
+                    use_resonance = False  # 回退到旧版
 
-            hex_config = self.config.get("hexagram", {})
-            p025_config = hex_config.get("memory", {})
+            if not use_resonance:
+                # P0.25 Phase 2: 卦象加权检索（回退）
+                hex_binary = None
+                hu_binary = None
+                if self._hex_state:
+                    hex_binary = self._hex_state.get("current", {}).get("binary")
+                    hu_binary = self._hex_state.get("hu", {}).get("binary")
 
-            relevant = self.memory.get_relevant_memories_with_hexagram(
-                message,
-                current_hexagram_binary=hex_binary,
-                current_hu_binary=hu_binary,
-                max_memories=mem_config.get("max_inject", 15),
-                hex_weight=p025_config.get("hex_weight", 0.3),
-                hu_weight=p025_config.get("hu_weight", 0.2),
-                hu_resonance_boost=p025_config.get("hu_resonance_boost", 0.5),
-            )
-            self.ctx.set_memory_context(relevant)
-            # P0.9: 记录记忆检索
-            if self.observer:
-                self.observer.record_memory(relevant)
+                hex_config = self.config.get("hexagram", {})
+                p025_config = hex_config.get("memory", {})
+
+                relevant = self.memory.get_relevant_memories_with_hexagram(
+                    message,
+                    current_hexagram_binary=hex_binary,
+                    current_hu_binary=hu_binary,
+                    max_memories=mem_config.get("max_inject", 15),
+                    hex_weight=p025_config.get("hex_weight", 0.3),
+                    hu_weight=p025_config.get("hu_weight", 0.2),
+                    hu_resonance_boost=p025_config.get("hu_resonance_boost", 0.5),
+                )
+                self.ctx.set_memory_context(relevant)
+                if self.observer:
+                    self.observer.record_memory(relevant)
 
         # P0.29: 编译知识页检索（零token，追加到记忆上下文）
         if self.memory_compiler:
@@ -1120,15 +1143,29 @@ class ZhileCore:
             hex_binary = self._hex_state.get("current", {}).get("binary")
             hu_binary = self._hex_state.get("hu", {}).get("binary")
 
+        # P0.42: 生成共振快照
+        label_snapshot = None
+        try:
+            from resonance_engine import ResonanceEngine
+            from datetime import datetime as _dt
+            _now = _dt.now()
+            _engine = ResonanceEngine()
+            label_snapshot = _engine.extract_compact_snapshot(
+                _engine.generate_snapshot(_now.year, _now.month, _now.day, _now.hour, _now.minute)
+            )
+        except Exception:
+            pass
+
         try:
             count = self.memory.extract_from_conversation(
                 self.ctx.history,
                 hexagram_binary=hex_binary,
                 hu_binary=hu_binary,
+                label_snapshot=label_snapshot,
             )
             return {"extracted": True, "count": count}
         except Exception as e:
-            return {"extracted": False, "reason": f"提取失败: {e}"}
+            return {"extracted": False, "reason": "提取失败: " + str(e)}
 
     def growth_stats(self) -> dict:
         if not self.growth:
@@ -1473,10 +1510,23 @@ class ZhileCore:
         if self._hex_state:
             hex_binary = self._hex_state.get("current", {}).get("binary")
             hu_binary = self._hex_state.get("hu", {}).get("binary")
+        # P0.42: 生成共振快照
+        label_snapshot = None
+        try:
+            from resonance_engine import ResonanceEngine
+            from datetime import datetime as _dt
+            _now = _dt.now()
+            _engine = ResonanceEngine()
+            label_snapshot = _engine.extract_compact_snapshot(
+                _engine.generate_snapshot(_now.year, _now.month, _now.day, _now.hour, _now.minute)
+            )
+        except Exception:
+            pass
         return self.memory.extract_from_conversation(
             self.ctx.history,
             hexagram_binary=hex_binary,
             hu_binary=hu_binary,
+            label_snapshot=label_snapshot,
         )
 
     # ─── 实体图 ───────────────────────────────
@@ -1558,10 +1608,23 @@ class ZhileCore:
                 if self._hex_state:
                     hex_binary = self._hex_state.get("current", {}).get("binary")
                     hu_binary = self._hex_state.get("hu", {}).get("binary")
+                # P0.42: 生成共振快照
+                label_snapshot = None
+                try:
+                    from resonance_engine import ResonanceEngine
+                    from datetime import datetime as _dt
+                    _now = _dt.now()
+                    _engine = ResonanceEngine()
+                    label_snapshot = _engine.extract_compact_snapshot(
+                        _engine.generate_snapshot(_now.year, _now.month, _now.day, _now.hour, _now.minute)
+                    )
+                except Exception:
+                    pass
                 count = self.memory.extract_from_conversation(
                     self.ctx.history,
                     hexagram_binary=hex_binary,
                     hu_binary=hu_binary,
+                    label_snapshot=label_snapshot,
                 )
                 saved["memories"] = count
 
