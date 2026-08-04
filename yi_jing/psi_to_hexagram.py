@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
-P0.24 Layer 3: PSI → 卦象映射函数
+[已废弃 — P0.42] PSI → 卦象映射函数
 将PSI五维连续值映射为64卦离散状态
+
+⚠️ 此模块在P0.42卦象标签系统独立化后已废弃。
+   卦象现在通过梅花易数时间起卦（hexagram_tracker.update_by_time()）获得，
+   不再依赖PSI推导。保留此文件用于向后兼容和回退。
 
 约定：binary字符串 bottom-to-top
   binary[0] = 初爻(最底爻) = 活力
