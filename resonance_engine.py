@@ -771,8 +771,9 @@ class ResonanceEngine:
         """
         import time as _time
 
-        # ── 缓存命中检查 ──
-        cache_key = (year, month, day, hour, minute, gender)
+        # ── 缓存命中检查（时间桶：5分钟一个桶）──
+        bucket_minute = (minute // (cache_ttl // 60)) * (cache_ttl // 60) if cache_ttl >= 60 else minute
+        cache_key = (year, month, day, hour, bucket_minute, gender)
         now_ts = _time.time()
         if (cls._cache_raw is not None
                 and cls._cache_key == cache_key
