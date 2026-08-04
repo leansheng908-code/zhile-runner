@@ -23,7 +23,8 @@ class ContextAssembler:
                  memory_context: str = "", psi_context: str = "",
                  arc_light_context: str = "", somatic_context: str = "",
                  feedback_hints: str = "", hexagram_context: str = "",
-                 plugin_context: str = "", fleeting_moment_context: str = ""):
+                 plugin_context: str = "", fleeting_moment_context: str = "",
+                 free_will_hint: str = ""):
         self.system_prompt = system_prompt
         self.max_history = max_history
         self.memory_context = memory_context
@@ -34,6 +35,7 @@ class ContextAssembler:
         self.hexagram_context = hexagram_context
         self.plugin_context = plugin_context
         self.fleeting_moment_context = fleeting_moment_context
+        self.free_will_hint = free_will_hint
         self.history: List[Dict[str, str]] = []
 
     def set_memory_context(self, memory_context: str):
@@ -65,6 +67,14 @@ class ContextAssembler:
     def clear_fleeting_moment(self):
         """清空瞬时感知上下文"""
         self.fleeting_moment_context = ""
+
+    def set_free_will_hint(self, hint: str):
+        """设置自由意志提示（拒绝权等，每轮对话后清空）"""
+        self.free_will_hint = hint
+
+    def clear_free_will_hint(self):
+        """清空自由意志提示"""
+        self.free_will_hint = ""
 
     def add_user_message(self, content: str):
         self.history.append({"role": "user", "content": content})
@@ -154,6 +164,12 @@ class ContextAssembler:
                 "\n\n---\n"
                 "## 插件上下文\n\n"
                 + self.plugin_context
+            )
+
+        if self.free_will_hint:
+            prompt += (
+                "\n\n---\n"
+                + self.free_will_hint
             )
 
         return prompt
