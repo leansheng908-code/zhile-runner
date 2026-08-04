@@ -49,6 +49,7 @@ _SYSTEM_CONFIGS = [
     {"id": "zhongyi",   "name": "中医术数时间", "dir": "zhongyi",   "module": "zhongyi_label_dictionary",   "func": "generate_labels_from_timestamp", "dims": 158},
     {"id": "qita",      "name": "其他中国术数", "dir": "qita",      "module": "qita_label_dictionary",      "func": "generate_labels_from_timestamp", "dims": 178},
     {"id": "canmou",    "name": "参考系统",     "dir": "canmou",    "module": "canmou_label_dictionary",    "func": "generate_canmou_labels",         "dims": 111},
+    {"id": "jyotish",   "name": "印度占星",     "dir": "jyotish",   "module": "jyotish_label_dictionary",   "func": "generate_labels_from_timestamp", "dims": 55},
 ]
 
 
@@ -167,6 +168,7 @@ _NORMALIZERS = {
     "zhongyi": _normalize_layers_system,
     "qita": _normalize_layers_system,
     "canmou": _normalize_canmou,
+    "jyotish": _normalize_layers_system,
 }
 
 
