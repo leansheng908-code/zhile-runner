@@ -342,6 +342,8 @@ class CLI:
             self._handle_schedule(parts)
         elif main_cmd == "/bgplugin":
             self._handle_bgplugin(parts)
+        elif main_cmd == "/diag":
+            self._handle_diag(parts)
         elif main_cmd == "/help":
             self._print_help()
         elif main_cmd == "/test":
@@ -2278,6 +2280,281 @@ class CLI:
         else:
             print(f"{Color.DIM}用法: /bgplugin [status|start|stop]{Color.RESET}")
 
+    # ─── 隐藏系统诊断 ──────────────────────
+
+    def _handle_diag(self, parts: list):
+        """深度诊断：主动测试所有隐藏系统的存活状态"""
+        import time as _time
+        from datetime import datetime as _dt
+
+        if not self.core:
+            print(f"{Color.RED}Core 未初始化{Color.RESET}")
+            return
+
+        c = self.core
+        now = _dt.now()
+        pass_count = 0
+        fail_count = 0
+        warn_count = 0
+        results = []
+
+        def ok(name, detail=""):
+            nonlocal pass_count
+            pass_count += 1
+            results.append(f"  {Color.GREEN}✅ {name}{Color.RESET}" + (f" {Color.DIM}{detail}{Color.RESET}" if detail else ""))
+
+        def fail(name, detail=""):
+            nonlocal fail_count
+            fail_count += 1
+            results.append(f"  {Color.RED}❌ {name}{Color.RESET}" + (f" {Color.RED}{detail}{Color.RESET}" if detail else ""))
+
+        def warn(name, detail=""):
+            nonlocal warn_count
+            warn_count += 1
+            results.append(f"  {Color.YELLOW}⚠️  {name}{Color.RESET}" + (f" {Color.DIM}{detail}{Color.RESET}" if detail else ""))
+
+        print(f"\n{Color.CYAN}═══ 隐藏系统深度诊断 ═══{Color.RESET}")
+        print(f"{Color.DIM}时间: {now.strftime('%Y-%m-%d %H:%M:%S')}{Color.RESET}\n")
+
+        # ── 1. 13术数系统快照生成 ──
+        print(f"{Color.CYAN}── 1. 术数系统快照生成 ──{Color.RESET}")
+        try:
+            from resonance_engine import ResonanceEngine
+            import sys as _sys
+            import os as _os
+            _BASE = _os.path.dirname(_os.path.abspath(__file__))
+
+            _SYS_LIST = [
+                ("yi_jing", "yi_jing", "yi_jing_label_dictionary", "generate_labels_from_timestamp"),
+                ("bazi", "bazi", "bazi_label_dictionary", "generate_labels_from_timestamp"),
+                ("ziwei", "ziwei", "ziwei_label_dictionary", "generate_labels_from_timestamp"),
+                ("qimen", "qimen", "qimen_label_dictionary", "generate_labels_from_timestamp"),
+                ("liuren", "liuren", "liuren_label_dictionary", "generate_labels_from_timestamp"),
+                ("taiyi", "taiyi", "taiyi_label_dictionary", "generate_labels_from_timestamp"),
+                ("tongsheng", "tongsheng", "tongsheng_label_dictionary", "generate_labels_from_timestamp"),
+                ("zhongyi", "zhongyi", "zhongyi_label_dictionary", "generate_labels_from_timestamp"),
+                ("qita", "qita", "qita_label_dictionary", "generate_labels_from_timestamp"),
+                ("canmou", "canmou", "canmou_label_dictionary", "generate_canmou_labels"),
+                ("jyotish", "jyotish", "jyotish_label_dictionary", "generate_labels_from_timestamp"),
+                ("tarot", "tarot", "tarot_label_dictionary", "generate_labels_from_timestamp"),
+                ("economic_cycle", "economic_cycle", "economic_cycle_label_dictionary", "generate_labels_from_timestamp"),
+            ]
+
+            sys_ok = 0
+            sys_fail_list = []
+            for sys_name, dir_name, mod_name, func_name in _SYS_LIST:
+                sys_dir = _os.path.join(_BASE, dir_name)
+                if sys_dir not in _sys.path:
+                    _sys.path.insert(0, sys_dir)
+                try:
+                    mod = __import__(mod_name)
+                    func = getattr(mod, func_name)
+                    # 尝试调用
+                    import inspect
+                    sig = inspect.signature(func)
+                    params = list(sig.parameters.keys())
+                    if "dt" in params or len(params) == 1:
+                        result = func(now)
+                    elif len(params) == 5:
+                        result = func(now.year, now.month, now.day, now.hour, now.minute)
+                    elif len(params) == 4:
+                        result = func(now.year, now.month, now.day, now.hour)
+                    else:
+                        result = func(now.year, now.month, now.day, now.hour, now.minute)
+                    if result:
+                        sys_ok += 1
+                    else:
+                        sys_fail_list.append(f"{sys_name}(空结果)")
+                except Exception as e:
+                    sys_fail_list.append(f"{sys_name}({type(e).__name__}: {str(e)[:40]})")
+
+            if sys_ok == 13:
+                ok(f"13/13术数系统全部存活", f"({sys_ok}/13)")
+            elif sys_ok > 0:
+                warn(f"部分系统存活", f"({sys_ok}/13) 失败: {', '.join(sys_fail_list)}")
+            else:
+                fail("术数系统全部失败", "检查lunar_python等依赖")
+        except Exception as e:
+            fail("术数系统测试异常", str(e)[:60])
+
+        # ── 2. 共振快照+缓存 ──
+        print(f"{Color.CYAN}── 2. 共振引擎+缓存 ──{Color.RESET}")
+        try:
+            from resonance_engine import ResonanceEngine
+            engine = ResonanceEngine()
+
+            # 清缓存后冷启动
+            ResonanceEngine._cache_raw = None
+            t0 = _time.perf_counter()
+            snap = engine.generate_snapshot(now.year, now.month, now.day, now.hour, now.minute)
+            t_cold = (_time.perf_counter() - t0) * 1000
+
+            # 缓存命中
+            t0 = _time.perf_counter()
+            snap2 = engine.generate_snapshot(now.year, now.month, now.day, now.hour, now.minute)
+            t_hot = (_time.perf_counter() - t0) * 1000
+
+            sys_count = len(snap) if snap else 0
+            if sys_count >= 10:
+                ok(f"快照生成 {sys_count}/13系统", f"冷{t_cold:.0f}ms 热{t_hot:.3f}ms")
+            elif sys_count > 0:
+                warn(f"快照生成 {sys_count}/13系统", f"冷{t_cold:.0f}ms")
+            else:
+                fail("快照生成失败", "0个系统产出")
+
+            if t_hot < 1.0:
+                ok("缓存命中", f"{t_hot:.3f}ms")
+            else:
+                warn("缓存未命中", f"{t_hot:.1f}ms")
+        except Exception as e:
+            fail("共振引擎异常", str(e)[:60])
+
+        # ── 3. 共振计算 ──
+        print(f"{Color.CYAN}── 3. 共振计算 ──{Color.RESET}")
+        try:
+            compact = engine.extract_compact_snapshot(snap)
+            t0 = _time.perf_counter()
+            score = engine.calculate(compact, compact)
+            t_calc = (_time.perf_counter() - t0) * 1000
+            if 0.5 < score < 2.5:
+                ok(f"共振计算正常", f"自共振={score:.3f} ({t_calc:.2f}ms)")
+            else:
+                warn(f"共振分数异常", f"score={score:.3f}")
+        except Exception as e:
+            fail("共振计算异常", str(e)[:60])
+
+        # ── 4. 瞬时感知层 ──
+        print(f"{Color.CYAN}── 4. 瞬时感知层(一期一会) ──{Color.RESET}")
+        try:
+            if c.fleeting_moment:
+                fm = c.fleeting_moment
+
+                class _FakeMem:
+                    _resonance_raw = 1.8
+                    content = "诊断测试记忆"
+                    class memory:
+                        content = "诊断测试记忆"
+
+                hex_info = None
+                if c._hex_state:
+                    hex_info = c._hex_state.get("current", {})
+                result = fm.generate([_FakeMem()], hexagram_info=hex_info)
+
+                if result and result.get("descriptor"):
+                    ok("瞬时感知生成", f"档位={result.get('level','?')} 日记={result.get('diary_written', False)}")
+                elif result is None:
+                    ok("瞬时感知跳过", "共振分低于阈值(正常)")
+                else:
+                    warn("瞬时感知返回空", str(result)[:40])
+            else:
+                warn("瞬时感知未初始化", "fleeting_moment=None")
+        except Exception as e:
+            fail("瞬时感知异常", str(e)[:60])
+
+        # ── 5. 记忆系统+标签覆盖率 ──
+        print(f"{Color.CYAN}── 5. 记忆系统+标签覆盖 ──{Color.RESET}")
+        try:
+            if c.memory:
+                stats = c.memory.get_stats()
+                total = stats.get("total", 0)
+                active = stats.get("active", 0)
+
+                # 检查label_snapshot覆盖率
+                has_label = 0
+                no_label = 0
+                if hasattr(c.memory, 'memories') and c.memory.memories:
+                    for m in c.memory.memories:
+                        if hasattr(m, 'label_snapshot') and m.label_snapshot:
+                            has_label += 1
+                        else:
+                            no_label += 1
+                    coverage = has_label / len(c.memory.memories) * 100 if c.memory.memories else 0
+                else:
+                    coverage = 0
+
+                ok(f"记忆系统", f"总{total} 活跃{active}")
+                if has_label > 0:
+                    ok(f"标签覆盖率", f"{has_label}/{has_label+no_label} ({coverage:.0f}%)")
+                elif no_label > 0:
+                    warn(f"标签覆盖率", f"0/{no_label} (0%) — 旧记忆无标签")
+                else:
+                    print(f"  {Color.DIM}  (无记忆数据){Color.RESET}")
+
+                # 检查共振检索
+                if hasattr(c.memory, '_last_top_memories'):
+                    ok("共振检索属性", "_last_top_memories 已暴露")
+                else:
+                    fail("共振检索属性缺失", "_last_top_memories 不存在")
+            else:
+                fail("记忆系统未初始化")
+        except Exception as e:
+            fail("记忆系统异常", str(e)[:60])
+
+        # ── 6. 卦象系统 ──
+        print(f"{Color.CYAN}── 6. 卦象系统 ──{Color.RESET}")
+        try:
+            if c.hexagram_tracker:
+                state = c.hexagram_tracker.update_by_time()
+                hex_name = state.get("current", {}).get("name", "?") if isinstance(state, dict) else "?"
+                ok(f"卦象更新", f"当前={hex_name}")
+
+                if c.hexagram_expression:
+                    ok("卦象感知生成器", "已初始化")
+                else:
+                    warn("卦象感知生成器", "未初始化(LLM生成需API)")
+            else:
+                warn("卦象系统未启用", "hexagram_tracker=None")
+        except Exception as e:
+            fail("卦象系统异常", str(e)[:60])
+
+        # ── 7. PSI引擎 ──
+        print(f"{Color.CYAN}── 7. PSI引擎 ──{Color.RESET}")
+        try:
+            if c.psi:
+                stats = c.psi.get_stats()
+                dims = {k: round(v, 2) for k, v in stats.items() if isinstance(v, (int, float))}
+                ok(f"PSI引擎", f"帧#{stats.get('consciousness_frame', 0)} {dims}")
+            else:
+                warn("PSI引擎未初始化")
+        except Exception as e:
+            fail("PSI引擎异常", str(e)[:60])
+
+        # ── 8. 其他核心子系统 ──
+        print(f"{Color.CYAN}── 8. 其他核心子系统 ──{Color.RESET}")
+        subsystems = [
+            ("认知路由器", "cognitive_router"),
+            ("体细胞系统", "somatic_cells"),
+            ("弧光系统", "arc_light"),
+            ("自由意志", "free_will"),
+            ("成长扫描", "growth"),
+            ("记忆编译", "memory_compiler"),
+            ("观察者", "observer"),
+        ]
+        for label, attr in subsystems:
+            obj = getattr(c, attr, None)
+            if obj is not None:
+                ok(label, "存活")
+            else:
+                warn(label, "未初始化")
+
+        # ── 汇总 ──
+        print()
+        for line in results:
+            print(line)
+        print()
+        total = pass_count + fail_count + warn_count
+        print(f"{Color.CYAN}═══ 诊断结果: {Color.GREEN}{pass_count}✅{Color.RESET} "
+              f"{Color.YELLOW}{warn_count}⚠️{Color.RESET} "
+              f"{Color.RED}{fail_count}❌{Color.RESET} "
+              f"{Color.DIM}/ {total}项{Color.RESET}")
+        if fail_count == 0 and warn_count == 0:
+            print(f"{Color.GREEN}全部系统健康运转 ✓{Color.RESET}")
+        elif fail_count == 0:
+            print(f"{Color.YELLOW}核心系统正常，部分子系统未初始化（可能未配置）{Color.RESET}")
+        else:
+            print(f"{Color.RED}有 {fail_count} 个系统失败，需排查{Color.RESET}")
+        print()
+
     def _print_help(self):
         print(f"{Color.DIM}─── 命令 ───{Color.RESET}")
         print(f"  {Color.CYAN}/help{Color.RESET}              显示帮助")
@@ -2364,6 +2641,7 @@ class CLI:
         print(f"  {Color.CYAN}/schedule list{Color.RESET}     列出定时任务")
         print(f"  {Color.CYAN}/bgplugin status{Color.RESET}   后台插件状态")
         print(f"  {Color.CYAN}/bgplugin start{Color.RESET}    启动所有插件")
+        print(f"  {Color.CYAN}/diag{Color.RESET}              隐藏系统深度诊断")
         print(f"  {Color.CYAN}/exit{Color.RESET}              退出（自动保存）")
 
     def _print_welcome(self):
