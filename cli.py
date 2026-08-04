@@ -141,7 +141,8 @@ class CLI:
                         hex_info = (self.core._hex_state.get("current", {})
                                     if self.core._hex_state else None)
                         fm_result = self.core.fleeting_moment.generate(
-                            relevant, hexagram_info=hex_info)
+                            getattr(self.core.memory, '_last_top_memories', []),
+                            hexagram_info=hex_info)
                         if fm_result:
                             self.ctx.set_fleeting_moment(fm_result['descriptor'])
                 except (NameError, Exception):
