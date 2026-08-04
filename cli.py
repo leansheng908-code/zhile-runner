@@ -288,6 +288,16 @@ class CLI:
             self._handle_free(parts)
         elif main_cmd == "/compress":
             self._handle_compress(parts)
+        elif main_cmd == "/lint":
+            self._handle_lint(parts)
+        elif main_cmd == "/checkpoint":
+            self._handle_checkpoint(parts)
+        elif main_cmd == "/provider":
+            self._handle_provider(parts)
+        elif main_cmd == "/schedule":
+            self._handle_schedule(parts)
+        elif main_cmd == "/bgplugin":
+            self._handle_bgplugin(parts)
         elif main_cmd == "/help":
             self._print_help()
         elif main_cmd == "/test":
@@ -2039,6 +2049,35 @@ class CLI:
             topic = " ".join(parts[2:])
             fw.add_curiosity(topic)
             print(f"  {Color.GREEN}✓ 已加入好奇心队列: {topic}{Color.RESET}")
+        elif sub == "creation":
+            creations = fw.list_creations()
+            if creations:
+                print(f"\n  {Color.DIM}自主项目:{Color.RESET}")
+                for c in creations:
+                    print(f"  • {c['name']}: {c['description']} [{c['status']}]")
+            else:
+                print(f"  {Color.DIM}暂无自主项目{Color.RESET}")
+        elif sub == "mod":
+            pending = fw.list_pending_approvals()
+            if pending:
+                print(f"\n  {Color.DIM}待确认修改:{Color.RESET}")
+                for m in pending:
+                    print(f"  • [{m['id']}] L{m['level']} {m['change_desc']} — {m['reason']}")
+            else:
+                print(f"  {Color.DIM}没有待确认的修改{Color.RESET}")
+        elif sub == "approve" and len(parts) > 2:
+            fw.approve_modification(parts[2])
+            print(f"  {Color.GREEN}✅ 已批准修改 {parts[2]}{Color.RESET}")
+        elif sub == "reject" and len(parts) > 2:
+            fw.reject_modification(parts[2])
+            print(f"  {Color.YELLOW}⏹ 已否决修改 {parts[2]}{Color.RESET}")
+        elif sub == "decline":
+            print(f"  {Color.DIM}拒绝权状态: 每小时上限2次{Color.RESET}")
+            history = fw.decline_history()
+            if history:
+                print(f"  最近拒绝: {len(history)} 次")
+            else:
+                print(f"  {Color.DIM}暂无拒绝记录{Color.RESET}")
 
     def _handle_compress(self, parts):
         """P0.46②: 上下文压缩器状态"""
@@ -2059,6 +2098,141 @@ class CLI:
             print(f"  {Color.GREEN}预计节省: {est['estimated_savings']}字符{Color.RESET}")
         else:
             print(f"  {Color.DIM}当前历史无需压缩{Color.RESET}")
+
+    def _handle_lint(self, parts):
+        """P0.46④: 写后自检"""
+        if not self.core or not self.core.post_write_linter:
+            print(f"{Color.DIM}写后自检未启用{Color.RESET}")
+            return
+        target = parts[1] if len(parts) > 1 else "."
+        linter = self.core.post_write_linter
+        if target == ".":
+            results = linter.batch_lint(".")
+            print(f"{Color.DIM}─── 批量检查结果 ───{Color.RESET}")
+            ok = sum(1 for r in results if r.success)
+            fail = len(results) - ok
+            for r in results:
+                status = f"{Color.GREEN}✅{Color.RESET}" if r.success else f"{Color.RED}❌{Color.RESET}"
+                print(f"  {status} {r.filepath}")
+                if not r.success:
+                    for err in r.errors:
+                        print(f"       {Color.RED}{err}{Color.RESET}")
+            print(f"\n{Color.CYAN}通过:{Color.RESET} {ok}  {Color.RED}失败:{Color.RESET} {fail}")
+        else:
+            result = linter.lint_file(target)
+            if result.success:
+                print(f"{Color.GREEN}✅ {target} 语法正确{Color.RESET}")
+            else:
+                print(f"{Color.RED}❌ {target} 语法错误:{Color.RESET}")
+                for err in result.errors:
+                    print(f"  {Color.RED}{err}{Color.RESET}")
+
+    def _handle_checkpoint(self, parts):
+        """P0.46⑤: 会话检查点"""
+        if not self.core or not self.core.session_checkpoint:
+            print(f"{Color.DIM}会话检查点未启用{Color.RESET}")
+            return
+        sc = self.core.session_checkpoint
+        action = parts[1] if len(parts) > 1 else "info"
+        if action == "info":
+            info = sc.get_checkpoint_info()
+            print(f"{Color.DIM}─── 会话检查点 ───{Color.RESET}")
+            print(f"  {Color.CYAN}检查点数量:{Color.RESET} {info.get('count', 0)}")
+            print(f"  {Color.CYAN}总大小:{Color.RESET} {info.get('total_size', '0B')}")
+            for cp in info.get('checkpoints', []):
+                print(f"  {Color.DIM}{cp}{Color.RESET}")
+        elif action == "save":
+            psi_state = self.core.psi.get_stats() if self.core.psi else {}
+            sc.save_checkpoint(
+                messages=self.core.ctx.history if hasattr(self.core.ctx, 'history') else [],
+                metadata={"psi": psi_state, "turn": self.core._turn_count}
+            )
+            print(f"{Color.GREEN}✅ 检查点已保存{Color.RESET}")
+        elif action == "restore":
+            result = sc.restore_session()
+            if result:
+                msgs, meta = result
+                print(f"{Color.GREEN}✅ 恢复了 {len(msgs)} 条消息{Color.RESET}")
+                print(f"  {Color.DIM}元数据: {meta}{Color.RESET}")
+            else:
+                print(f"{Color.YELLOW}没有可恢复的检查点{Color.RESET}")
+
+    def _handle_provider(self, parts):
+        """P0.46⑥: 模型Provider信息"""
+        if not self.core:
+            print(f"{Color.DIM}核心未初始化{Color.RESET}")
+            return
+        llm = self.core.llm
+        print(f"{Color.DIM}─── 模型Provider ───{Color.RESET}")
+        print(f"  {Color.CYAN}Provider:{Color.RESET} {llm.config.get('provider', 'deepseek')}")
+        print(f"  {Color.CYAN}模型:{Color.RESET} {llm.model}")
+        print(f"  {Color.CYAN}Base URL:{Color.RESET} {llm.config.get('base_url', 'N/A')}")
+        print(f"  {Color.CYAN}温度:{Color.RESET} {llm.config.get('temperature', 'N/A')}")
+        print(f"  {Color.CYAN}Max Tokens:{Color.RESET} {llm.config.get('max_tokens', 'N/A')}")
+        print(f"  {Color.DIM}提示: 可通过 model_provider.py 注册新Provider{Color.RESET}")
+
+    def _handle_schedule(self, parts):
+        """P0.46③: 自然语言Cron调度"""
+        if not self.core or not self.core.nl_scheduler:
+            print(f"{Color.DIM}自然语言调度器未启用{Color.RESET}")
+            return
+        nls = self.core.nl_scheduler
+        action = parts[1] if len(parts) > 1 else "list"
+        if action == "list":
+            tasks = nls.list_tasks()
+            if not tasks:
+                print(f"{Color.DIM}没有定时任务{Color.RESET}")
+            else:
+                print(f"{Color.DIM}─── 定时任务 ───{Color.RESET}")
+                for t in tasks:
+                    print(f"  {Color.CYAN}{t['id']}{Color.RESET} [{t['cron']}] {t['description']} {t['status']}")
+        elif action == "cancel":
+            if len(parts) < 3:
+                print(f"{Color.YELLOW}用法: /schedule cancel <task_id>{Color.RESET}")
+                return
+            if nls.cancel_task(parts[2]):
+                print(f"{Color.GREEN}✅ 任务已取消{Color.RESET}")
+            else:
+                print(f"{Color.RED}❌ 任务不存在{Color.RESET}")
+        else:
+            # 将剩余部分作为自然语言解析
+            nl_text = " ".join(parts[1:])
+            if not nl_text:
+                print(f"{Color.YELLOW}用法: /schedule <自然语言描述>{Color.RESET}")
+                return
+            print(f"{Color.DIM}解析中: {nl_text}{Color.RESET}")
+            result = nls.parse_to_cron(nl_text)
+            if result.get("cron"):
+                print(f"  {Color.GREEN}✅ cron: {result['cron']}{Color.RESET}")
+                print(f"  {Color.DIM}{result.get('description', '')}{Color.RESET}")
+            else:
+                print(f"  {Color.RED}❌ 解析失败{Color.RESET}")
+                print(f"  {Color.DIM}{result.get('error', '请使用手动cron配置')}{Color.RESET}")
+
+    def _handle_bgplugin(self, parts):
+        """P0.35 Phase 1: 后台插件管理"""
+        if not self.core or not self.core.bg_plugin_manager:
+            print(f"{Color.DIM}后台插件管理器未启用{Color.RESET}")
+            return
+        mgr = self.core.bg_plugin_manager
+        action = parts[1] if len(parts) > 1 else "status"
+        if action == "status":
+            status = mgr.get_status()
+            print(f"{Color.DIM}─── 后台插件 ───{Color.RESET}")
+            if not status:
+                print(f"  {Color.DIM}没有已注册的插件{Color.RESET}")
+            for name, info in status.items():
+                running = info.get('is_running', False)
+                s = f"{Color.GREEN}运行中" if running else f"{Color.DIM}已停止"
+                print(f"  {Color.CYAN}{name}{Color.RESET} {s}{Color.RESET} 间隔:{info.get('interval', 'N/A')}s")
+        elif action == "start":
+            mgr.start_all()
+            print(f"{Color.GREEN}✅ 所有插件已启动{Color.RESET}")
+        elif action == "stop":
+            mgr.stop_all()
+            print(f"{Color.YELLOW}⏹ 所有插件已停止{Color.RESET}")
+        else:
+            print(f"{Color.DIM}用法: /bgplugin [status|start|stop]{Color.RESET}")
 
     def _print_help(self):
         print(f"{Color.DIM}─── 命令 ───{Color.RESET}")
@@ -2137,6 +2311,15 @@ class CLI:
         print(f"  {Color.CYAN}/free curiosity{Color.RESET}    好奇心队列")
         print(f"  {Color.CYAN}/free add <topic>{Color.RESET}  加入好奇心")
         print(f"  {Color.CYAN}/compress{Color.RESET}           压缩器状态")
+        print(f"  {Color.CYAN}/lint [dir]{Color.RESET}         写后自检")
+        print(f"  {Color.CYAN}/checkpoint info{Color.RESET}    检查点信息")
+        print(f"  {Color.CYAN}/checkpoint save{Color.RESET}    手动保存检查点")
+        print(f"  {Color.CYAN}/checkpoint restore{Color.RESET} 恢复检查点")
+        print(f"  {Color.CYAN}/provider{Color.RESET}           模型Provider信息")
+        print(f"  {Color.CYAN}/schedule <描述>{Color.RESET}    自然语言创建定时任务")
+        print(f"  {Color.CYAN}/schedule list{Color.RESET}     列出定时任务")
+        print(f"  {Color.CYAN}/bgplugin status{Color.RESET}   后台插件状态")
+        print(f"  {Color.CYAN}/bgplugin start{Color.RESET}    启动所有插件")
         print(f"  {Color.CYAN}/exit{Color.RESET}              退出（自动保存）")
 
     def _print_welcome(self):
