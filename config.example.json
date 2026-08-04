@@ -263,5 +263,29 @@
   "active_reconstruction": {
     "enabled": true,
     "max_rounds": 5
+  },
+  "skill_evolution": {
+    "enabled": true,
+    "threshold": 5,
+    "dir": "skills"
+  },
+  "post_write_lint": {
+    "enabled": true,
+    "skip_dirs": ["__pycache__", ".git"],
+    "max_file_size": 1048576
+  },
+  "session_checkpoint": {
+    "enabled": true,
+    "dir": "checkpoints",
+    "max_checkpoints": 20,
+    "checkpoint_interval": 50,
+    "compress": true
+  },
+  "nl_scheduler": {
+    "enabled": true
+  },
+  "background_plugins": {
+    "enabled": true,
+    "dir": "plugins"
   }
 }
