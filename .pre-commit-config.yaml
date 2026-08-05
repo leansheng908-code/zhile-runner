@@ -1,0 +1,32 @@
+# zhile-runner pre-commit配置
+# 安装: pip install pre-commit && pre-commit install
+# 手动运行: pre-commit run --all-files
+repos:
+  # ─── 基础检查 ───
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace        # 去除行尾空格
+      - id: end-of-file-fixer          # 确保文件以换行结尾
+      - id: check-yaml                 # YAML语法检查
+      - id: check-json                 # JSON语法检查
+      - id: check-merge-conflict       # 合并冲突标记检查
+      - id: check-added-large-files    # 大文件检查（防止误推二进制）
+        args: ['--maxkb=500']
+
+  # ─── Python编译检查 ───
+  - repo: local
+    hooks:
+      - id: py-compile
+        name: Python编译检查 (py_compile)
+        entry: python3 -m py_compile
+        language: system
+        files: \.py$
+
+  # ─── 密钥泄露防护（最重要！）───
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+        exclude: package.lock
