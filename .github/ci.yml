@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install ruff flake8 pytest
+
+      - name: Ruff check (格式+lint)
+        run: ruff check --select=E,F,W --ignore=E501 .
+
+      - name: Flake8 (风格检查)
+        run: flake8 --max-line-length=120 --extend-ignore=E203,W503 .
+
+      - name: Python编译检查
+        run: |
+          python -m py_compile *.py
+          echo "✅ 所有Python文件编译通过"
+
+      - name: 运行测试
+        run: |
+          if [ -d tests ]; then
+            python -m pytest tests/ -v
+          else
+            echo "ℹ️ 暂无测试目录，跳过"
+          fi
