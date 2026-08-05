@@ -82,11 +82,17 @@ class BackgroundPlugin(ABC):
         self.is_running = False
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
-        self._error_count = 0
-        self._max_errors = 10  # 连续出错上限
+        self._error_count = 0  # 连续错误计数（成功时重置）
+        self._max_errors = 10  # 连续出错上限（向后兼容）
+        self._crash_count = 0  # 总崩溃次数（不重置，用于熔断器）
+        self._circuit_disabled = False  # 熔断器是否已触发禁用
+        self._tick_timeout = self.config.get("tick_timeout", 30)  # tick()超时秒数
         self._last_tick_time: Optional[datetime] = None
         self._tick_count = 0
         self._output_callback: Optional[Callable[[str], None]] = None
+        # 熔断器退避时间表：第1次→立即重试，第2次→30s，第3次→60s，第4+次→300s
+        self._BACKOFF_TIMES = [0, 0, 30, 60, 300]
+        self._CRASH_DISABLE_THRESHOLD = 5  # 连续崩溃5次后禁用
 
     def set_output_callback(self, callback: Callable[[str], None]):
         """设置输出通道回调，插件可通过 send_output() 发送消息"""
@@ -134,6 +140,25 @@ class BackgroundPlugin(ABC):
         """插件停止时调用，可覆盖做清理"""
         pass
 
+    # ─── 状态序列化（热重载时保留状态） ──────────
+
+    def serialize(self) -> dict:
+        """返回可序列化的状态数据，子类可覆盖以支持热重载状态保持。
+
+        示例:
+            def serialize(self):
+                return {"alerted_today": self._alerted_today}
+        """
+        return {}
+
+    def deserialize(self, state: dict):
+        """从序列化数据恢复状态，子类可覆盖。
+
+        Args:
+            state: serialize()返回的字典
+        """
+        pass
+
     def start(self):
         """启动后台循环（daemon线程）"""
         if self.is_running:
@@ -157,7 +182,7 @@ class BackgroundPlugin(ABC):
         print(f"  ▶ 后台插件 '{self.name}' 已启动 (间隔 {self.get_interval()}s)")
 
     def stop(self):
-        """停止后台循环"""
+        """停止后台循环（协作式停机 + 强杀兜底）"""
         if not self.is_running:
             return
         self.is_running = False
@@ -169,35 +194,117 @@ class BackgroundPlugin(ABC):
         except Exception as e:
             print(f"  ⚠ 插件 {self.name} on_stop 异常: {e}")
 
+        # 协作式停机：等待线程退出
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=5)
+            # 如果5秒后仍未退出，强制终止
+            if self._thread.is_alive():
+                self._force_kill_thread()
+
         print(f"  ⏹ 后台插件 '{self.name}' 已停止")
 
+    def _force_kill_thread(self):
+        """强制终止线程（最后手段，使用ctypes注入异常）"""
+        if not self._thread or not self._thread.is_alive():
+            return
+        try:
+            import ctypes
+            tid = ctypes.c_long(self._thread.ident)
+            exc = ctypes.py_object(SystemExit)
+            # 连续注入2次提高成功率
+            for _ in range(2):
+                ctypes.pythonapi.PyThreadState_SetAsyncExc(tid, exc)
+            self._thread.join(timeout=2)
+            if self._thread.is_alive():
+                print(f"  ⚠ 插件 {self.name} 强杀后线程仍存活（daemon线程，随进程退出）")
+            else:
+                print(f"  ⚡ 插件 {self.name} 已强制终止")
+        except Exception as e:
+            print(f"  ⚠ 插件 {self.name} 强杀失败: {e}（daemon线程，随进程退出）")
+
     def _run_loop(self):
-        """后台线程主循环"""
+        """后台线程主循环（熔断器 + tick超时保护）"""
         while not self._stop_event.is_set():
+            # 熔断器检查
+            if self._circuit_disabled:
+                break
+
             interval = self.get_interval()
 
-            # 等待间隔或停止信号
+            # 等待间隔或停止信号（Event.wait替代sleep，秒级响应停止）
             if self._stop_event.wait(interval):
                 break
 
             if not self.is_running:
                 break
 
-            # 执行tick，捕获所有异常
+            # 执行tick（带超时保护）
+            self._tick_with_timeout()
+
+    def _tick_with_timeout(self):
+        """执行tick()，带超时保护和熔断器"""
+        tick_done = threading.Event()
+        tick_error = [None]
+
+        def _safe_tick():
             try:
                 self.tick()
-                self._tick_count += 1
-                self._last_tick_time = datetime.now()
-                self._error_count = 0  # 成功则重置错误计数
             except Exception as e:
-                self._error_count += 1
-                print(f"  ⚠ 插件 {self.name} tick 异常 ({self._error_count}/{self._max_errors}): {e}")
-                if self._error_count >= self._max_errors:
-                    print(f"  ✖ 插件 {self.name} 连续错误达到上限，自动停止")
-                    self.is_running = False
-                    break
+                tick_error[0] = e
+            finally:
+                tick_done.set()
+
+        t = threading.Thread(target=_safe_tick, daemon=True, name=f"tick-{self.name}")
+        t.start()
+
+        # 轮询等待tick完成或超时，同时响应停止信号
+        deadline = time.monotonic() + self._tick_timeout
+        while not tick_done.is_set():
+            if self._stop_event.is_set():
+                return  # 收到停止信号，放弃等待
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                # tick超时
+                self._handle_crash(f"tick超时({self._tick_timeout}s)")
+                return
+            tick_done.wait(timeout=min(0.5, remaining))
+
+        if tick_error[0] is not None:
+            self._handle_crash(str(tick_error[0]))
+        else:
+            # 成功
+            self._tick_count += 1
+            self._last_tick_time = datetime.now()
+            self._error_count = 0  # 重置连续错误
+
+    def _handle_crash(self, reason: str):
+        """处理插件崩溃（熔断器逻辑）"""
+        self._error_count += 1
+        self._crash_count += 1
+        print(f"  ⚠ 插件 {self.name} 崩溃 #{self._crash_count} ({reason})")
+
+        # 达到禁用阈值
+        if self._crash_count >= self._CRASH_DISABLE_THRESHOLD:
+            print(f"  ✖ 插件 {self.name} 连续崩溃{self._crash_count}次，熔断器触发，自动禁用")
+            self._circuit_disabled = True
+            self.is_running = False
+            # 通知用户
+            if self._output_callback:
+                try:
+                    self._output_callback(
+                        f"⚠ 后台插件 '{self.name}' 连续崩溃{self._crash_count}次已自动禁用，"
+                        f"最近原因: {reason}。可用 /bgplugin reload {self.name} 重试"
+                    )
+                except Exception:
+                    pass
+            return
+
+        # 退避等待
+        idx = min(self._crash_count - 1, len(self._BACKOFF_TIMES) - 1)
+        wait = self._BACKOFF_TIMES[idx]
+        if wait > 0:
+            print(f"  ⏳ 插件 {self.name} 退避 {wait}s 后重试...")
+            self._stop_event.wait(wait)
 
     def get_status(self) -> dict:
         """返回插件状态"""
@@ -210,6 +317,8 @@ class BackgroundPlugin(ABC):
             "tick_count": self._tick_count,
             "last_tick": self._last_tick_time.isoformat() if self._last_tick_time else None,
             "error_count": self._error_count,
+            "crash_count": self._crash_count,
+            "circuit_disabled": self._circuit_disabled,
         }
 
     # ─── P0.56: 能力暴露 ──────────────────────────
