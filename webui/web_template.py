@@ -343,32 +343,58 @@ async function send() {
     // 移除打字动画
     typingEl.remove();
 
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let firstChunk = true;
+    // 检查是否支持流式读取
+    if (!res.body || !res.body.getReader) {
+      // 降级：非流式读取
+      const data = await res.json();
+      if (data.error) {
+        msgEl.textContent = '⚠ ' + data.error;
+        msgEl.style.color = 'var(--red)';
+      } else if (data.reply) {
+        msgEl.textContent = data.reply;
+        scrollBottom();
+      } else {
+        msgEl.textContent = '⚠ 收到空回复';
+        msgEl.style.color = 'var(--red)';
+      }
+    } else {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let firstChunk = true;
+      let gotAnyData = false;
 
-    while (true) {
-      const {done, value} = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, {stream: true});
-      const lines = buffer.split('\n');
-      buffer = lines.pop();
+      while (true) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, {stream: true});
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
 
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        try {
-          const data = JSON.parse(line.slice(6));
-          if (data.chunk) {
-            if (firstChunk) { msgEl.textContent = ''; firstChunk = false; }
-            msgEl.textContent += data.chunk;
-            scrollBottom();
-          }
-          if (data.done) {
-            if (data.psi) updatePSI(data.psi);
-            if (data.status) updateStatus(data.status);
-          }
-        } catch(e) {}
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            gotAnyData = true;
+            if (data.chunk) {
+              if (firstChunk) { msgEl.textContent = ''; firstChunk = false; }
+              msgEl.textContent += data.chunk;
+              scrollBottom();
+            }
+            if (data.error) {
+              msgEl.textContent = '⚠ ' + data.error;
+              msgEl.style.color = 'var(--red)';
+            }
+            if (data.done) {
+              if (data.psi) updatePSI(data.psi);
+              if (data.status) updateStatus(data.status);
+            }
+          } catch(e) { console.log('parse error:', e, line); }
+        }
+      }
+      if (!gotAnyData) {
+        msgEl.textContent = '⚠ 未收到数据（可能API调用失败）';
+        msgEl.style.color = 'var(--red)';
       }
     }
   } catch(e) {
