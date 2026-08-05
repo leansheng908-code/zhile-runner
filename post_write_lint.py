@@ -407,6 +407,56 @@ class PostWriteLinter:
 
         return _callback
 
+    def lint_recently_modified(
+        self, directory: str, since: float
+    ) -> List[LintResult]:
+        """检查指定时间后被修改的文件（自动触发用）。
+
+        遍历目录，找出 mtime > since 且扩展名受支持的所有文件，
+        执行语法检查。专为 code_run / code_debug 后自动触发设计。
+
+        Args:
+            directory: 要扫描的根目录。
+            since: Unix 时间戳，只检查此时间之后修改的文件。
+
+        Returns:
+            被检查文件的 LintResult 列表（空列表表示无文件被修改）。
+        """
+        dir_path = Path(directory)
+        if not dir_path.exists():
+            return []
+
+        results: List[LintResult] = []
+
+        for item in dir_path.rglob("*"):
+            if item.is_dir():
+                continue
+
+            # 跳过排除目录
+            try:
+                rel_parts = item.relative_to(dir_path).parts
+            except ValueError:
+                continue
+            if any(part in self.skip_dirs for part in rel_parts[:-1]):
+                continue
+
+            # 只检查受支持的文件类型
+            ext = item.suffix.lower()
+            if ext not in _LINTERS:
+                continue
+
+            # 只检查指定时间后修改的文件
+            try:
+                if item.stat().st_mtime <= since:
+                    continue
+            except OSError:
+                continue
+
+            result = self.lint_file(str(item))
+            results.append(result)
+
+        return results
+
     @staticmethod
     def summarize_results(results: List[LintResult]) -> Dict[str, Any]:
         """汇总批量检查结果。
