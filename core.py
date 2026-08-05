@@ -978,9 +978,26 @@ class ZhileCore:
             self.background.register_output(output_callback)
         self.background.start()
 
+        # P0.35 Phase 1: 启动后台插件
+        if self.bg_plugin_manager:
+            if output_callback:
+                self.bg_plugin_manager.set_output_callback(output_callback)
+            loaded = self.bg_plugin_manager.load_from_config()
+            print(f"  📦 后台插件加载: {loaded} 个")
+            self.bg_plugin_manager.start_all()
+
     def background_status(self) -> dict:
         """P0.37: 后台任务状态"""
-        return self.background.status()
+        status = self.background.status()
+        if self.bg_plugin_manager:
+            status["plugins"] = self.bg_plugin_manager.get_status()
+        return status
+
+    def stop_background(self):
+        """停止所有后台任务和插件"""
+        self.background.stop()
+        if self.bg_plugin_manager:
+            self.bg_plugin_manager.stop_all()
 
     def get_status(self) -> dict:
         ctx_stats = self.ctx.get_stats()
