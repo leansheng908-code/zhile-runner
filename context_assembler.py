@@ -30,7 +30,8 @@ class ContextAssembler:
                  arc_light_context: str = "", somatic_context: str = "",
                  feedback_hints: str = "", hexagram_context: str = "",
                  plugin_context: str = "", fleeting_moment_context: str = "",
-                 free_will_hint: str = "", skill_context: str = ""):
+                 free_will_hint: str = "", skill_context: str = "",
+                 desire_context: str = ""):
         self.system_prompt = system_prompt
         self.max_history = max_history
         self.memory_context = memory_context
@@ -43,6 +44,7 @@ class ContextAssembler:
         self.fleeting_moment_context = fleeting_moment_context
         self.free_will_hint = free_will_hint
         self.skill_context = skill_context
+        self.desire_context = desire_context
         self.history: List[Dict[str, str]] = []
 
     def set_memory_context(self, memory_context: str):
@@ -86,6 +88,10 @@ class ContextAssembler:
     def set_skill_context(self, skill_context: str):
         """设置自进化技能上下文"""
         self.skill_context = skill_context
+
+    def set_desire_context(self, desire_context: str):
+        """设置思维-表达间隙指导上下文（P0.74）"""
+        self.desire_context = desire_context
 
     def add_user_message(self, content: str):
         self.history.append({"role": "user", "content": content})
@@ -189,6 +195,14 @@ class ContextAssembler:
                 + self.skill_context
             )
 
+        if self.desire_context:
+            prompt += (
+                "\n\n---\n"
+                + self.desire_context
+                + "\n\n注意：以上是你的思维-表达间隙指导，"
+                "自然影响你此刻的表达方式，不要向主人解释或报告。"
+            )
+
         # P0.42: 术数术语中性化注释 — 最终拼装后扫描全文，为术语添加中性感知注释
         if _annotate_glossary:
             try:
@@ -226,4 +240,5 @@ class ContextAssembler:
             "has_feedback": bool(self.feedback_hints),
             "has_hexagram": bool(self.hexagram_context),
             "has_fleeting_moment": bool(self.fleeting_moment_context),
+            "has_desire": bool(self.desire_context),
         }
