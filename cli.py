@@ -2401,12 +2401,16 @@ class CLI:
         if action == "status":
             status = mgr.get_status()
             print(f"{Color.DIM}─── 后台插件 ───{Color.RESET}")
-            if not status:
-                print(f"  {Color.DIM}没有已注册的插件{Color.RESET}")
-            for name, info in status.items():
-                running = info.get('is_running', False)
+            print(f"  启用: {status.get('plugins_enabled', False)}  总数: {status.get('total', 0)}  运行中: {status.get('running', 0)}  已停止: {status.get('stopped', 0)}")
+            for p in status.get("plugins", []):
+                running = p.get("is_running", False)
                 s = f"{Color.GREEN}运行中" if running else f"{Color.DIM}已停止"
-                print(f"  {Color.CYAN}{name}{Color.RESET} {s}{Color.RESET} 间隔:{info.get('interval', 'N/A')}s")
+                interval = p.get("interval")
+                interval_str = f"{interval}s" if interval else "N/A"
+                ticks = p.get("tick_count", 0)
+                errors = p.get("error_count", 0)
+                last = p.get("last_tick", "N/A")
+                print(f"  {Color.CYAN}{p['name']}{Color.RESET} {s}{Color.RESET} 间隔:{interval_str}  ticks:{ticks}  错误:{errors}  最后:{last}")
         elif action == "start":
             mgr.start_all()
             print(f"{Color.GREEN}✅ 所有插件已启动{Color.RESET}")
