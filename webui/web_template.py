@@ -152,6 +152,35 @@ body {
 .typing span:nth-child(3) { animation-delay: 0.4s; }
 @keyframes blink { 0%,60%,100% { opacity: 0.3; } 30% { opacity: 1; } }
 
+/* ─── 命令面板 ─── */
+.cmd-panel {
+  max-height: 0; overflow: hidden; transition: max-height 0.3s ease;
+  border-top: 1px solid var(--border); background: var(--bg-card);
+}
+.cmd-panel.open { max-height: 320px; overflow-y: auto; }
+.cmd-panel-inner { padding: 12px 20px; }
+.cmd-group-title {
+  font-size: 11px; color: var(--text-dim); text-transform: uppercase;
+  letter-spacing: 1px; margin: 8px 0 6px;
+}
+.cmd-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 6px;
+}
+.cmd-btn {
+  padding: 8px 10px; border: 1px solid var(--border);
+  background: var(--bg-input); color: var(--text);
+  border-radius: 6px; cursor: pointer; font-size: 12px;
+  transition: all 0.2s; text-align: center;
+}
+.cmd-btn:hover {
+  border-color: var(--pink); color: var(--pink);
+  background: rgba(255,107,157,0.08);
+}
+.cmd-btn .cmd-icon { display: block; font-size: 16px; margin-bottom: 2px; }
+.cmd-btn .cmd-label { font-size: 11px; color: var(--text-dim); }
+.cmd-btn:hover .cmd-label { color: var(--pink); }
+
 .input-area {
   padding: 12px 20px; border-top: 1px solid var(--border);
   display: flex; gap: 8px; align-items: flex-end;
@@ -172,6 +201,12 @@ body {
 }
 .input-area button:hover { background: var(--pink-dim); }
 .input-area button:disabled { opacity: 0.5; cursor: not-allowed; }
+.input-area .cmd-toggle {
+  padding: 10px 14px; background: var(--bg-input); color: var(--cyan);
+  border: 1px solid var(--border); font-size: 18px;
+}
+.input-area .cmd-toggle:hover { border-color: var(--cyan); background: rgba(78,205,196,0.08); }
+.input-area .cmd-toggle.active { background: var(--cyan); color: var(--bg); border-color: var(--cyan); }
 
 /* ─── 手机端切换按钮 ─── */
 .mobile-toggle {
@@ -246,7 +281,33 @@ body {
     <span id="status-text">连接中...</span>
   </div>
   <div class="messages" id="messages"></div>
+
+  <!-- 命令面板 -->
+  <div class="cmd-panel" id="cmd-panel">
+    <div class="cmd-panel-inner">
+      <div class="cmd-group-title">状态查看</div>
+      <div class="cmd-grid">
+        <button class="cmd-btn" onclick="runCmd('/status')"><span class="cmd-icon">📊</span><span class="cmd-label">系统状态</span></button>
+        <button class="cmd-btn" onclick="runCmd('/psi')"><span class="cmd-icon">💗</span><span class="cmd-label">内在状态</span></button>
+        <button class="cmd-btn" onclick="runCmd('/destiny')"><span class="cmd-icon">🔮</span><span class="cmd-label">个人命格</span></button>
+        <button class="cmd-btn" onclick="runCmd('/destiny list')"><span class="cmd-icon">📜</span><span class="cmd-label">大运序列</span></button>
+        <button class="cmd-btn" onclick="runCmd('/memory')"><span class="cmd-icon">🧠</span><span class="cmd-label">记忆库</span></button>
+        <button class="cmd-btn" onclick="runCmd('/desire')"><span class="cmd-icon">💫</span><span class="cmd-label">欲望引擎</span></button>
+        <button class="cmd-btn" onclick="runCmd('/diag')"><span class="cmd-icon">🔧</span><span class="cmd-label">系统诊断</span></button>
+        <button class="cmd-btn" onclick="runCmd('/free')"><span class="cmd-icon">🕊️</span><span class="cmd-label">自由五层</span></button>
+      </div>
+      <div class="cmd-group-title">操作</div>
+      <div class="cmd-grid">
+        <button class="cmd-btn" onclick="runCmd('/news')"><span class="cmd-icon">📰</span><span class="cmd-label">有趣新闻</span></button>
+        <button class="cmd-btn" onclick="runCmd('/growth')"><span class="cmd-icon">🌱</span><span class="cmd-label">成长扫描</span></button>
+        <button class="cmd-btn" onclick="runCmd('/save')"><span class="cmd-icon">💾</span><span class="cmd-label">保存会话</span></button>
+        <button class="cmd-btn" onclick="runCmd('/clear')"><span class="cmd-icon">🧹</span><span class="cmd-label">清空对话</span></button>
+      </div>
+    </div>
+  </div>
+
   <div class="input-area">
+    <button class="cmd-toggle" id="cmd-toggle" onclick="toggleCmdPanel()">⚡</button>
     <textarea id="input" placeholder="跟知乐说点什么..." rows="1"
       onkeydown="onKey(event)" oninput="autoResize(this)"></textarea>
     <button id="send-btn" onclick="send()">发送</button>
@@ -406,6 +467,19 @@ async function send() {
   sending = false;
   document.getElementById('send-btn').disabled = false;
   input.focus();
+}
+
+// ─── 命令面板 ───
+function toggleCmdPanel() {
+  const panel = document.getElementById('cmd-panel');
+  const btn = document.getElementById('cmd-toggle');
+  panel.classList.toggle('open');
+  btn.classList.toggle('active');
+}
+function runCmd(cmd) {
+  toggleCmdPanel();
+  document.getElementById('input').value = cmd;
+  send();
 }
 
 // ─── 工具按钮 ───
