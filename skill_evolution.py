@@ -92,6 +92,7 @@ class SkillEvolution:
         # 运行时状态
         self.tool_calls: List[Dict[str, Any]] = []
         self.skills_registry: Dict[str, Dict[str, Any]] = {}
+        self._last_loaded_skills: List[str] = []  # 上次加载的技能名列表
 
         # 加载已有技能
         self._load_skills_internal()
@@ -393,9 +394,11 @@ class SkillEvolution:
         self._load_skills_internal()
 
         if not self.skills_registry:
+            self._last_loaded_skills = []
             return ""
 
         parts: List[str] = ["", "## 已积累的技能经验", ""]
+        loaded: List[str] = []
         for name, info in self.skills_registry.items():
             skill_path = Path(info["file"])
             if not skill_path.exists():
@@ -403,8 +406,11 @@ class SkillEvolution:
             try:
                 content = skill_path.read_text(encoding="utf-8")
                 parts.append(f"### 技能：{name}\n\n{content}\n")
+                loaded.append(name)
             except OSError:
                 continue
+
+        self._last_loaded_skills = loaded
 
         return "\n".join(parts) if len(parts) > 3 else ""
 
@@ -577,3 +583,100 @@ class SkillEvolution:
             return skill_path.read_text(encoding="utf-8")
         except OSError:
             return None
+
+    # ─── 清理与迭代 ──────────────────────────────────────────
+
+    def cleanup_old_skills(self) -> int:
+        """清理过期且低效的技能文件。
+
+        删除同时满足以下条件的技能：
+          1. 文件修改时间超过 MAX_CHECKPOINT_AGE_DAYS 天
+          2. 使用次数 >= 3 且成功率 < 30%
+
+        Returns:
+            被删除的技能数量。
+        """
+        self._load_skills_internal()
+        now = time.time()
+        max_age_sec = MAX_CHECKPOINT_AGE_DAYS * 86400
+        removed = 0
+
+        for name in list(self.skills_registry.keys()):
+            info = self.skills_registry[name]
+            skill_path = Path(info["file"])
+            if not skill_path.exists():
+                continue
+
+            # 检查文件年龄
+            try:
+                file_age = now - skill_path.stat().st_mtime
+            except OSError:
+                continue
+            if file_age < max_age_sec:
+                continue  # 还没过期
+
+            # 检查使用效果
+            usage = info.get("usage_count", 0)
+            success = info.get("success_count", 0)
+            if usage < 3:
+                continue  # 使用次数不够，不判断效果
+
+            success_rate = success / usage if usage > 0 else 0
+            if success_rate >= 0.3:
+                continue  # 成功率还行，保留
+
+            # 删除
+            try:
+                skill_path.unlink()
+                del self.skills_registry[name]
+                removed += 1
+                print(f"[SkillEvolution] 清理低效技能: {name} "
+                      f"(成功率 {success_rate:.0%})")
+            except OSError:
+                pass
+
+        return removed
+
+    def get_low_performing_skills(self, min_usage: int = 3,
+                                  max_success_rate: float = 0.5
+                                  ) -> List[Dict[str, Any]]:
+        """获取表现不佳的技能列表。
+
+        Args:
+            min_usage: 最少使用次数（低于此值不判断）。
+            max_success_rate: 成功率上限（低于此值视为不佳）。
+
+        Returns:
+            低效技能信息列表，每项含 name, usage_count, success_rate。
+        """
+        self._load_skills_internal()
+        result: List[Dict[str, Any]] = []
+        for name, info in self.skills_registry.items():
+            usage = info.get("usage_count", 0)
+            if usage < min_usage:
+                continue
+            success = info.get("success_count", 0)
+            rate = success / usage if usage > 0 else 0
+            if rate < max_success_rate:
+                result.append({
+                    "name": name,
+                    "usage_count": usage,
+                    "success_rate": rate,
+                })
+        return result
+
+    def evaluate_last_loaded(self, success: bool) -> None:
+        """评估上次加载的所有技能的使用效果。
+
+        在对话结束后调用，根据对话是否成功来更新技能评估记录。
+
+        Args:
+            success: 本次对话是否成功完成。
+        """
+        for name in self._last_loaded_skills:
+            try:
+                self.evaluate_skill(name, success)
+            except Exception:
+                pass
+        # 评估完清空，避免重复计分
+        self._last_loaded_skills = []
