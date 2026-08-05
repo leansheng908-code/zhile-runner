@@ -74,6 +74,14 @@ from nl_scheduler import NaturalLanguageScheduler
 # P0.35 Phase 1: 后台插件基类
 from background_plugin import PluginManager as BgPluginManager
 
+# P0.60: Provider Runtime + Work Ledger + 叙述事件
+from narration_events import NarrationEmitter
+from provider_runtime import (
+    ProviderRuntime,
+    SearchProvider,
+    CodeProvider,
+)
+
 # P0.24: 易经认知编码系统
 import sys as _sys, os as _os
 _yi_jing_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'yi_jing')
@@ -464,6 +472,35 @@ class ZhileCore:
             diary_threshold=fm_config.get("diary_threshold", 1.5),
         ) if fm_config.get("enabled", True) else None
 
+        # ─── P0.60: Provider Runtime + Work Ledger + 叙述事件 ────
+        self.provider_runtime = None  # 延迟初始化
+        self.narration = NarrationEmitter()
+        pr_config = self.config.get("provider_runtime", {})
+        if pr_config.get("enabled", True):
+            try:
+                self.provider_runtime = ProviderRuntime(
+                    config=pr_config,
+                    narration=self.narration,
+                )
+                # 注册 SearchProvider（复用现有 web_searcher）
+                if self.web_searcher:
+                    self.provider_runtime.register(
+                        SearchProvider(web_searcher=self.web_searcher)
+                    )
+                # 注册 CodeProvider（复用现有 sandbox 配置）
+                sandbox_config = self.config.get("sandbox", {})
+                from code_executor import CodeExecutor
+                code_executor = CodeExecutor(config=sandbox_config) if sandbox_config.get("enabled", True) else None
+                if code_executor:
+                    self.provider_runtime.register(
+                        CodeProvider(code_executor=code_executor)
+                    )
+                print(f"[Core] ProviderRuntime 已初始化 "
+                      f"(providers: {self.provider_runtime.provider_names})")
+            except Exception as e:
+                print(f"⚠ [Core] ProviderRuntime 初始化失败，降级跳过: {e}")
+                self.provider_runtime = None
+
     @staticmethod
     def _load_config(config_path: str) -> dict:
         path = Path(config_path)
@@ -720,6 +757,9 @@ class ZhileCore:
         }
         messages = [proactive_hint] + messages
 
+        # P0.60: 叙述事件 — 思考中（桌宠歪头）
+        self.narration.emit_thinking()
+
         # P0.34: 对话感知联网搜索（Function Calling）
         if self.web_search_enabled and self.web_searcher:
             search_rounds = 0
@@ -784,6 +824,13 @@ class ZhileCore:
                         print(f"🔍 [P0.34] 搜索: {query}")
 
                         results = self.web_searcher.search(query, num_r)
+
+                        # P0.60: 叙述事件 — 搜索任务状态
+                        self.narration.emit_task_status(
+                            "web_search", "completed",
+                            f"搜索完成: {query} ({len(results)}条结果)"
+                        )
+
                         results_text = "\n".join(
                             f"[{i+1}] {r['title']}: {r.get('snippet', '')[:120]}"
                             for i, r in enumerate(results)
@@ -822,12 +869,16 @@ class ZhileCore:
 
             # 如果工具调用后有消息追加，做一次流式输出（带搜索提示）
             if not full_response:
+                # P0.60: 叙述事件 — 开始说话（桌宠嘴巴动）
+                self.narration.emit_speaking()
                 final_messages = [search_hint] + messages
                 for chunk in self.llm.chat(final_messages, stream=True):
                     full_response += chunk
                     yield chunk
         else:
             # 普通流式调用
+            # P0.60: 叙述事件 — 开始说话（桌宠嘴巴动）
+            self.narration.emit_speaking()
             for chunk in self.llm.chat(messages, stream=True):
                 full_response += chunk
                 yield chunk
@@ -2057,6 +2108,53 @@ class ZhileCore:
             self.feedback_loop.reset_all()
             return True
 
+    # ─── P0.60: Provider Runtime 派发 ─────────
+
+    def dispatch_work(self, provider_name: str, task: dict,
+                      async_mode: bool = False) -> dict:
+        """对外暴露的任务派发方法
+
+        Args:
+            provider_name: Provider 名称（如 "search", "code"）
+            task: 任务参数dict
+            async_mode: True=异步（返回 {"work_id": ...}），False=同步（返回完整结果）
+
+        Returns:
+            同步: {"work_id", "status", "result"}
+            异步: {"work_id", "status": "pending"}
+            不可用: {"error": "..."}
+        """
+        if not self.provider_runtime:
+            return {"error": "ProviderRuntime 未初始化"}
+        if async_mode:
+            work_id = self.provider_runtime.dispatch_async(provider_name, task)
+            return {"work_id": work_id, "status": "pending"}
+        return self.provider_runtime.dispatch_sync(provider_name, task)
+
+    def work_status(self, work_id: str) -> dict:
+        """查询任务状态"""
+        if not self.provider_runtime:
+            return {"error": "ProviderRuntime 未初始化"}
+        return self.provider_runtime.get_status(work_id)
+
+    def work_history(self, limit: int = 20) -> list:
+        """查询任务历史"""
+        if not self.provider_runtime:
+            return []
+        return self.provider_runtime.get_history(limit)
+
+    def work_retry(self, work_id: str) -> str:
+        """重试失败任务"""
+        if not self.provider_runtime:
+            return work_id
+        return self.provider_runtime.retry(work_id)
+
+    def work_pending(self) -> list:
+        """获取未完成任务列表"""
+        if not self.provider_runtime:
+            return []
+        return self.provider_runtime.pending_works()
+
     # ─── 生命周期 ─────────────────────────────
 
     def save(self):
@@ -2175,6 +2273,15 @@ class ZhileCore:
         # P0.11: 停止守护进程
         if self.daemon:
             self.daemon.stop()
+
+        # P0.60: WorkLedger 持久化（SQLite已自动持久化，此处仅记录pending状态）
+        if self.provider_runtime and self.provider_runtime.ledger:
+            try:
+                pending = self.provider_runtime.pending_works()
+                if pending:
+                    saved["pending_works"] = len(pending)
+            except Exception:
+                pass
 
         return saved
 
