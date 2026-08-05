@@ -61,7 +61,10 @@ class Memory:
                  memory_id: str = None,
                  hexagram_binary: str = None, hu_binary: str = None,
                  label_snapshot: dict = None,
-                 cues: List[str] = None, tags: List[str] = None):
+                 cues: List[str] = None, tags: List[str] = None,
+                 reflection_status: str = None,
+                 reflection_of: List[str] = None,
+                 reflection_hits: int = 0):
         self.content = content
         self.category = category
         self.importance = max(1, min(10, importance))
@@ -79,6 +82,10 @@ class Memory:
         # P0.39: Cue-Tag-Content 三层关联图
         self.cues = cues or []   # 细粒度关键词（3-5个）
         self.tags = tags or []   # 语义标签桥梁（1-2个，≤2词）
+        # P0.21 L3: 反思状态机
+        self.reflection_status = reflection_status  # None/pending/confirmed/denied/promoted/merged/absorbed
+        self.reflection_of = reflection_of or []    # 源记忆ID列表
+        self.reflection_hits = reflection_hits      # 确认命中次数
 
     @staticmethod
     def _make_id(content: str, created_at: str) -> str:
@@ -101,6 +108,9 @@ class Memory:
             "label_snapshot": self.label_snapshot,
             "cues": self.cues,
             "tags": self.tags,
+            "reflection_status": self.reflection_status,
+            "reflection_of": self.reflection_of,
+            "reflection_hits": self.reflection_hits,
         }
 
     @classmethod
@@ -118,6 +128,9 @@ class Memory:
             label_snapshot=d.get("label_snapshot"),
             cues=d.get("cues", []),
             tags=d.get("tags", []),
+            reflection_status=d.get("reflection_status"),
+            reflection_of=d.get("reflection_of", []),
+            reflection_hits=d.get("reflection_hits", 0),
         )
 
     def should_archive(self) -> bool:
@@ -1111,9 +1124,316 @@ P0.39 Cue-Tag标注：
                 if len(all_entity_ids) > 1:
                     self.entity_graph.add_co_occurrence_edges(list(all_entity_ids))
 
+            # P0.21 L3: 提取后自动巩固反思
+            try:
+                self.consolidate_reflections()
+            except Exception:
+                pass
+
             return count
         except (json.JSONDecodeError, KeyError, Exception):
             return 0
+
+    # ─── P0.21 L3: 反思状态机 ─────────────────
+
+    def consolidate_reflections(self):
+        """L3反思巩固入口 — 查找同主题记忆→合成pending反思
+
+        生命周期：
+            pending（待定）→ confirmed（确认）→ promoted（升入persona）
+                                            → denied（否决）→ archived（归档）
+        与体细胞"候选→转正"机制完全同构。
+
+        每次调用执行三步：
+        1. 验证已有的pending反思 → confirmed或denied
+        2. 提升confirmed且hits≥3的反思 → promoted到persona维度
+        3. 查找新的同主题记忆群 → 合成pending反思
+        """
+        try:
+            # 1. 验证已有pending反思
+            self._validate_reflections()
+            # 2. 提升已确认的反思
+            self._promote_reflections()
+            # 3. 查找同主题记忆群→合成新pending反思
+            self._consolidate_new_reflections()
+        except Exception:
+            pass
+
+    def _find_related_memories(self, memory: Memory) -> List[Memory]:
+        """按cues/tags/entity_ids相似度找同主题记忆
+
+        参数:
+            memory: 起始记忆
+
+        返回:
+            相关记忆列表（包含起始记忆本身），至少需要2条才值得反思
+        """
+        related = [memory]
+        mem_cues = set(c.lower() for c in (memory.cues or []))
+        mem_tags = set(t.lower() for t in (memory.tags or []))
+        mem_entities = set(memory.entity_ids or [])
+
+        for m in self.memories:
+            if m.id == memory.id:
+                continue
+            if m.should_archive():
+                continue
+            # 不对反思类记忆再次反思
+            if m.dimension == "reflection":
+                continue
+            if m.reflection_status == "absorbed":
+                continue
+
+            m_cues = set(c.lower() for c in (m.cues or []))
+            m_tags = set(t.lower() for t in (m.tags or []))
+            m_entities = set(m.entity_ids or [])
+
+            # 共享至少一个cue/tag/entity即视为同主题
+            if mem_cues & m_cues or mem_tags & m_tags or mem_entities & m_entities:
+                related.append(m)
+
+        return related
+
+    def _synthesize_reflection(self, sources: List[Memory]) -> Optional[str]:
+        """用LLM从多条记忆合成一条反思
+
+        参数:
+            sources: 源记忆列表（≥2条）
+
+        返回:
+            反思内容字符串，无法合成时返回None
+        """
+        if not self.llm or len(sources) < 2:
+            return None
+
+        mem_texts = "\n".join(
+            f"- [{CATEGORY_NAMES.get(s.category, s.category)}] {s.content}"
+            for s in sources
+        )
+
+        prompt = f"""从以下多条相关记忆中，合成一条更高层次的反思洞察。
+
+源记忆：
+{mem_texts}
+
+合成规则：
+1. 提炼这些记忆的共同主题和深层规律
+2. 形成一条简洁的反思（不超过2句话）
+3. 反思应该是可复用的通用洞察，而非对具体事件的复述
+4. 如果这些记忆之间没有有意义的关联，返回 SKIP
+
+直接返回反思内容，不要其他文字。如果没有有意义的反思，返回 SKIP。"""
+
+        messages = [
+            {"role": "system", "content": "你是反思合成助手。"},
+            {"role": "user", "content": prompt},
+        ]
+
+        try:
+            result = ""
+            for chunk in self.llm.chat(messages, stream=True):
+                result += chunk
+            result = result.strip()
+            if not result or result == "SKIP":
+                return None
+            return result
+        except Exception:
+            return None
+
+    def _validate_reflections(self):
+        """验证pending反思 → confirmed或denied
+
+        验证逻辑：
+        - 如果反思创建后有源记忆被触发 → confirmed，hits+1
+        - 如果7天内无源记忆触发 → denied
+        - 源记忆已全部归档 → denied
+        """
+        pending = [
+            m for m in self.memories
+            if m.dimension == "reflection"
+            and m.reflection_status == "pending"
+        ]
+
+        if not pending:
+            return
+
+        now = datetime.now()
+        changed = False
+
+        for refl in pending:
+            source_ids = refl.reflection_of or []
+            sources = [m for m in self.memories if m.id in source_ids]
+
+            if not sources:
+                # 源记忆已归档，无法验证
+                refl.reflection_status = "denied"
+                changed = True
+                continue
+
+            try:
+                refl_created = datetime.fromisoformat(refl.created_at)
+            except (ValueError, TypeError):
+                refl_created = now
+
+            triggered_since = False
+            for src in sources:
+                try:
+                    src_triggered = datetime.fromisoformat(src.last_triggered)
+                except (ValueError, TypeError):
+                    continue
+                if src_triggered > refl_created:
+                    triggered_since = True
+                    break
+
+            if triggered_since:
+                refl.reflection_status = "confirmed"
+                refl.reflection_hits += 1
+                changed = True
+            elif (now - refl_created).days >= 7:
+                # 7天内无源记忆触发 → 否决
+                refl.reflection_status = "denied"
+                changed = True
+
+        if changed:
+            self._save_memories()
+
+    def _promote_reflections(self):
+        """confirmed且hits≥3的反思 → promoted到persona维度
+
+        提升后源记忆标记absorbed → 移到archive（不删除，可回溯）
+        """
+        to_promote = [
+            m for m in self.memories
+            if m.dimension == "reflection"
+            and m.reflection_status == "confirmed"
+            and m.reflection_hits >= 3
+        ]
+
+        if not to_promote:
+            return
+
+        for refl in to_promote:
+            refl.reflection_status = "promoted"
+            refl.dimension = "persona"
+            # 源记忆标记absorbed → 归档
+            self._mark_absorbed(refl.reflection_of or [])
+
+        self._save_memories()
+
+    def _mark_absorbed(self, source_ids: List[str]):
+        """源记忆标记absorbed → 移到archive
+
+        不删除，保留在archive.json中可回溯。
+
+        参数:
+            source_ids: 被反思吸收的源记忆ID列表
+        """
+        if not source_ids:
+            return
+
+        to_absorb = [
+            m for m in self.memories
+            if m.id in source_ids and m.reflection_status != "absorbed"
+        ]
+
+        if not to_absorb:
+            return
+
+        # 标记absorbed
+        for m in to_absorb:
+            m.reflection_status = "absorbed"
+
+        # 移到archive（不删除，可回溯）
+        archive_data = []
+        if self.archive_file.exists():
+            try:
+                with open(self.archive_file, "r", encoding="utf-8") as f:
+                    archive_data = json.load(f)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        archive_data.extend([m.to_dict() for m in to_absorb])
+        with open(self.archive_file, "w", encoding="utf-8") as f:
+            json.dump(archive_data, f, ensure_ascii=False, indent=2)
+
+        # 从活跃记忆中移除
+        absorbed_ids = {m.id for m in to_absorb}
+        self.memories = [m for m in self.memories if m.id not in absorbed_ids]
+
+    def _consolidate_new_reflections(self):
+        """查找同主题记忆群 → 合成新的pending反思
+
+        - 遍历非反思类活跃记忆，按cues/tags/entity_ids聚类
+        - 每组≥2条同主题记忆 → LLM合成一条反思
+        - 反思ID从源记忆ID派生（幂等），已存在则跳过
+        """
+        # 只处理非反思类、非absorbed的活跃记忆
+        candidates = [
+            m for m in self.memories
+            if not m.should_archive()
+            and m.dimension != "reflection"
+            and m.reflection_status != "absorbed"
+        ]
+
+        if len(candidates) < 2:
+            return
+
+        # 已有的反思ID集合（幂等检查）
+        existing_refl_ids = {
+            m.id for m in self.memories if m.dimension == "reflection"
+        }
+
+        processed = set()
+        new_reflections = []
+
+        for mem in candidates:
+            if mem.id in processed:
+                continue
+
+            related = self._find_related_memories(mem)
+            if len(related) < 2:
+                continue
+
+            source_ids = sorted([m.id for m in related])
+            refl_id = "refl_" + hashlib.md5(
+                "_".join(source_ids).encode()).hexdigest()[:12]
+
+            # 幂等：同源反思已存在则跳过
+            if refl_id in existing_refl_ids:
+                processed.update(source_ids)
+                continue
+
+            # LLM合成反思
+            reflection_text = self._synthesize_reflection(related)
+            if not reflection_text:
+                processed.update(source_ids)
+                continue
+
+            # 聚合cues/tags
+            all_cues = list(set(
+                c for m in related for c in (m.cues or [])))[:5]
+            all_tags = list(set(
+                t for m in related for t in (m.tags or [])))[:2]
+
+            refl_mem = Memory(
+                content=reflection_text,
+                category="insight",
+                importance=min(10, max(m.importance for m in related) + 1),
+                dimension="reflection",
+                memory_id=refl_id,
+                cues=all_cues,
+                tags=all_tags,
+                reflection_status="pending",
+                reflection_of=source_ids,
+                reflection_hits=0,
+            )
+            new_reflections.append(refl_mem)
+            existing_refl_ids.add(refl_id)
+            processed.update(source_ids)
+
+        if new_reflections:
+            self.memories.extend(new_reflections)
+            self._save_memories()
 
     # ─── 统计 ─────────────────────────────────
 
@@ -1137,6 +1457,12 @@ P0.39 Cue-Tag标注：
             "has_session": bool(self.session_history),
             "session_messages": len(self.session_history),
             "hexagram_tagged": sum(1 for m in active if m.hexagram_binary),
+            # P0.21 L3: 反思状态机统计
+            "reflection": {
+                "pending": sum(1 for m in active if m.reflection_status == "pending"),
+                "confirmed": sum(1 for m in active if m.reflection_status == "confirmed"),
+                "promoted": sum(1 for m in active if m.reflection_status == "promoted"),
+            },
         }
 
         if self.entity_graph:
