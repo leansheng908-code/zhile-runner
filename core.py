@@ -421,9 +421,9 @@ class ZhileCore:
         fw_config = self.config.get("free_will", {})
         self.free_will = FreeWillFoundation(config=fw_config)
 
-        # P0.46①: 自进化Skills系统
+        # P0.46①: 自进化Skills系统 v2（传完整config以获取llm配置）
         se_config = self.config.get("skill_evolution", {})
-        self.skill_evolution = SkillEvolution(config=se_config) if se_config.get("enabled", True) else None
+        self.skill_evolution = SkillEvolution(config=self.config) if se_config.get("enabled", True) else None
 
         # P0.46④: 写后自检
         pw_config = self.config.get("post_write_lint", {})
@@ -656,10 +656,10 @@ class ZhileCore:
             if plugin_ctx:
                 self.ctx.set_plugin_context(plugin_ctx)
 
-        # P0.46①: 自进化Skills — 注入已有技能到上下文
+        # P0.46①: 自进化Skills v2 — 智能匹配注入
         if self.skill_evolution:
             try:
-                skill_ctx = self.skill_evolution.load_skills()
+                skill_ctx = self.skill_evolution.load_skills(user_message=message)
                 if skill_ctx:
                     self.ctx.set_skill_context(skill_ctx)
             except Exception:
