@@ -1,3 +1,10 @@
 {
-  "plugins": []
+  "plugins": [
+    {
+      "name": "stock_monitor",
+      "module": "stock_monitor",
+      "class": "StockMonitorPlugin",
+      "config": {}
+    }
+  ]
 }
