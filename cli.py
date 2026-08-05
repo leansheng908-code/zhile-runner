@@ -345,6 +345,8 @@ class CLI:
             self._handle_bgplugin(parts)
         elif main_cmd == "/diag":
             self._handle_diag(parts)
+        elif main_cmd == "/work":
+            self._handle_work(parts)
         elif main_cmd == "/help":
             self._print_help()
         elif main_cmd == "/test":
@@ -2507,6 +2509,75 @@ class CLI:
             print(f"  {Color.CYAN}/bgplugin uninstall <name>{Color.RESET} 卸载插件")
             print(f"  {Color.CYAN}/bgplugin reload <name>{Color.RESET}  热重载插件")
 
+    # ─── P0.60: 任务管理 ──────────────────────
+
+    def _handle_work(self, parts: list):
+        """任务管理命令：/work [history|status <id>|retry <id>]"""
+        if not self.core or not self.core.provider_runtime:
+            print(f"{Color.DIM}ProviderRuntime 未初始化{Color.RESET}")
+            return
+
+        sub = parts[1] if len(parts) > 1 else ""
+
+        if sub == "history":
+            history = self.core.work_history(limit=20)
+            if not history:
+                print(f"{Color.DIM}暂无任务历史{Color.RESET}")
+                return
+            print(f"{Color.DIM}─── 任务历史 ───{Color.RESET}")
+            for w in history:
+                status_color = (Color.GREEN if w.get("status") == "completed"
+                                else Color.RED if w.get("status") == "failed"
+                                else Color.YELLOW)
+                wid_short = w.get("id", "")[:8]
+                desc = w.get("description", "")[:30]
+                print(f"  {status_color}{wid_short}{Color.RESET} "
+                      f"[{w.get('provider', '')}] {desc} "
+                      f"({w.get('status', '')})")
+            print(f"{Color.DIM}共 {len(history)} 条记录{Color.RESET}")
+
+        elif sub == "status":
+            if len(parts) < 3:
+                print(f"{Color.DIM}用法: /work status <work_id>{Color.RESET}")
+                return
+            work_id = parts[2]
+            status = self.core.work_status(work_id)
+            if status.get("status") == "not_found":
+                print(f"{Color.RED}任务不存在: {work_id}{Color.RESET}")
+                return
+            print(f"{Color.DIM}─── 任务详情 ───{Color.RESET}")
+            print(f"  ID:          {status.get('work_id', '')}")
+            print(f"  状态:        {status.get('status', '')}")
+            print(f"  Provider:    {status.get('provider', '')}")
+            print(f"  描述:        {status.get('description', '')}")
+            print(f"  创建时间:    {status.get('created_at', '')}")
+            result = status.get("result")
+            if result:
+                print(f"  结果:        {Color.GREEN}{result}{Color.RESET}")
+
+        elif sub == "retry":
+            if len(parts) < 3:
+                print(f"{Color.DIM}用法: /work retry <work_id>{Color.RESET}")
+                return
+            work_id = parts[2]
+            self.core.work_retry(work_id)
+            print(f"{Color.GREEN}✦ 任务已重新派发: {work_id}{Color.RESET}")
+
+        else:
+            # 默认显示未完成任务
+            pending = self.core.work_pending()
+            if not pending:
+                print(f"{Color.DIM}暂无未完成任务{Color.RESET}")
+                return
+            print(f"{Color.DIM}─── 未完成任务 ───{Color.RESET}")
+            for w in pending:
+                wid_short = w.get("id", "")[:8]
+                desc = w.get("description", "")[:30]
+                print(f"  {Color.YELLOW}{wid_short}{Color.RESET} "
+                      f"[{w.get('provider', '')}] {desc} "
+                      f"({w.get('status', '')})")
+            print(f"{Color.DIM}共 {len(pending)} 个任务{Color.RESET}")
+
     # ─── 隐藏系统诊断 ──────────────────────
 
     def _handle_diag(self, parts: list):
@@ -2875,6 +2946,10 @@ class CLI:
         print(f"  {Color.CYAN}/bgplugin install{Color.RESET}  从URL安装插件")
         print(f"  {Color.CYAN}/bgplugin reload{Color.RESET}   热重载插件")
         print(f"  {Color.CYAN}/diag{Color.RESET}              隐藏系统深度诊断")
+        print(f"  {Color.CYAN}/work{Color.RESET}              未完成任务列表")
+        print(f"  {Color.CYAN}/work history{Color.RESET}      任务历史")
+        print(f"  {Color.CYAN}/work status <id>{Color.RESET}  查看任务详情")
+        print(f"  {Color.CYAN}/work retry <id>{Color.RESET}   重试失败任务")
         print(f"  {Color.CYAN}/exit{Color.RESET}              退出（自动保存）")
 
     def _print_welcome(self):
