@@ -49,6 +49,7 @@ class BackgroundPlugin(ABC):
         - get_interval(): 返回循环间隔秒数
 
     子类可选覆盖:
+        - on_load(): 加载时初始化（兼容PluginManager调用）
         - on_start(): 启动时初始化
         - on_stop(): 停止时清理
         - NAME: 插件名称（类属性）
@@ -71,14 +72,16 @@ class BackgroundPlugin(ABC):
     DESCRIPTION: str = ""
     VERSION: str = "1.0"
 
-    def __init__(self, config: Optional[dict] = None):
+    def __init__(self, config: Optional[dict] = None, core=None):
         """
         初始化后台插件
 
         Args:
             config: 插件配置字典
+            core: 核心引擎引用（可选，供插件访问运行器能力）
         """
         self.config = config or {}
+        self.core = core
         self.is_running = False
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
@@ -131,6 +134,10 @@ class BackgroundPlugin(ABC):
             float: 两次tick()之间的间隔秒数
         """
         ...
+
+    def on_load(self):
+        """插件加载时调用（兼容PluginManager），可覆盖做初始化"""
+        pass
 
     def on_start(self):
         """插件启动时调用，可覆盖做初始化"""
