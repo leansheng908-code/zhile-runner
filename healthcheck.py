@@ -128,6 +128,23 @@ EXPECTED_SYMBOLS = {
     "reflection_engine": ["ReflectionEngine"],
     "webui.web": ["create_app"],
     "webui.qq": ["QQAdapter"],
+    # P0.46/P0.56 新增模块
+    "background_plugin": ["BackgroundPlugin", "PluginManager"],
+    "background_manager": ["BackgroundTaskManager"],
+    "context_compressor": ["ContextCompressor"],
+    "skill_evolution": ["SkillEvolution"],
+    "model_provider": ["ModelProvider", "ProviderFactory", "LLMProviderAdapter"],
+    "nl_scheduler": ["NaturalLanguageScheduler", "CronParser"],
+    "post_write_lint": ["PostWriteLinter"],
+    "session_checkpoint": ["SessionCheckpoint"],
+    "free_will": ["FreeWillFoundation"],
+    "care_hooks": ["CareHookManager"],
+    "web_searcher": ["WebSearcher"],
+    "fleeting_moment": ["FleetingMoment"],
+    "resonance_engine": ["ResonanceEngine"],
+    "ammo_classifier": ["AmmoClassifier"],
+    "active_reconstruction": ["ActiveReconstructor"],
+    "forget_test_scheduler": ["ForgetTestScheduler"],
 }
 
 # ─── 检查结果统计 ───
