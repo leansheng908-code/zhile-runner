@@ -2,7 +2,7 @@
 """
 P0.33: 联网搜索 + 有趣新闻推送
 
-三引擎搜索：百度（直连） → Bing中国版（直连） → DuckDuckGo（代理兜底），无需API Key。
+四引擎搜索：Bing中国版 → Sogou → 百度 → curl兜底，无需API Key。
 每天定时推送：上午9点 + 下午4点。
 
 搜索流程：
@@ -15,33 +15,102 @@ P0.33: 联网搜索 + 有趣新闻推送
 
 import re
 import json
+import subprocess
+import shutil
 import urllib.request
 import urllib.parse
+import ssl
 from datetime import datetime
 from typing import List, Dict, Optional
 
 
 class WebSearcher:
-    """联网搜索器 — 百度直连 + Bing直连 + DuckDuckGo代理兜底"""
+    """联网搜索器 — Bing直连 + Sogou直连 + 百度直连 + curl兜底"""
+
+    # 通用浏览器headers（模拟Chrome 125 Windows）
+    BROWSER_HEADERS = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/125.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Accept-Encoding": "identity",  # 不压缩，便于解析
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+    }
 
     def __init__(self, config: dict):
         self.config = config or {}
-        self.timeout = self.config.get("timeout", 12)
+        self.timeout = self.config.get("timeout", 15)
         self.proxy = self.config.get("proxy", "")  # 如 http://127.0.0.1:7890
+        # SSL上下文（不验证证书，避免某些环境证书问题）
+        self._ssl_ctx = ssl.create_default_context()
+        self._ssl_ctx.check_hostname = False
+        self._ssl_ctx.verify_mode = ssl.CERT_NONE
+
+    def _fetch_url(self, url: str) -> Optional[str]:
+        """通用URL抓取，返回HTML文本"""
+        req = urllib.request.Request(url, headers=self.BROWSER_HEADERS)
+        # 配置代理
+        if self.proxy:
+            proxy_handler = urllib.request.ProxyHandler({
+                "http": self.proxy,
+                "https": self.proxy,
+            })
+            opener = urllib.request.build_opener(proxy_handler, urllib.request.HTTPSHandler(context=self._ssl_ctx))
+        else:
+            opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=self._ssl_ctx))
+        try:
+            with opener.open(req, timeout=self.timeout) as resp:
+                # 跟随重定向后获取最终URL
+                final_url = resp.geturl()
+                html = resp.read().decode("utf-8", errors="ignore")
+                return html
+        except Exception as e:
+            print(f"  ⚠ URL抓取失败: {e}")
+            return None
+
+    def _fetch_with_curl(self, url: str) -> Optional[str]:
+        """使用curl命令行抓取（urllib失败时的兜底）"""
+        curl_path = shutil.which("curl")
+        if not curl_path:
+            return None
+        try:
+            cmd = [
+                curl_path, "-sL", "--max-time", str(self.timeout),
+                "-A", self.BROWSER_HEADERS["User-Agent"],
+                "-H", "Accept-Language: zh-CN,zh;q=0.9",
+                url,
+            ]
+            if self.proxy:
+                cmd.extend(["--proxy", self.proxy])
+            result = subprocess.run(cmd, capture_output=True, timeout=self.timeout + 5)
+            if result.returncode == 0 and result.stdout:
+                return result.stdout.decode("utf-8", errors="ignore")
+        except Exception as e:
+            print(f"  ⚠ curl兜底失败: {e}")
+        return None
 
     def search(self, query: str, num_results: int = 5) -> List[Dict[str, str]]:
-        """搜索：百度 → Bing → DuckDuckGo，依次尝试"""
-        # 引擎1：百度（国内直连，最稳定）
-        results = self._search_baidu(query, num_results)
-        if results:
-            return results
-
-        # 引擎2：Bing中国版（国内直连）
+        """搜索：Bing → Sogou → 百度 → curl兜底，依次尝试"""
+        # 引擎1：Bing中国版（国内直连，反爬最宽松）
         results = self._search_bing(query, num_results)
         if results:
             return results
 
-        # 引擎3：DuckDuckGo（可能需要代理）
+        # 引擎2：搜狗（国内直连）
+        results = self._search_sogou(query, num_results)
+        if results:
+            return results
+
+        # 引擎3：百度（反爬较严，作为第三选择）
+        results = self._search_baidu(query, num_results)
+        if results:
+            return results
+
+        # 引擎4：DuckDuckGo（需代理）
         results = self._search_ddg(query, num_results)
         if results:
             return results
@@ -49,125 +118,37 @@ class WebSearcher:
         print(f"  ⚠ 所有搜索引擎均失败 [{query}]")
         return []
 
-    def _search_baidu(self, query: str, num: int) -> List[Dict[str, str]]:
-        """百度搜索（国内直连，无需代理）"""
-        url = f"https://www.baidu.com/s?wd={urllib.parse.quote(query)}&rn={num}"
-        req = urllib.request.Request(
-            url,
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (X11; Linux x86_64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/125.0.0.0 Safari/537.36"
-                ),
-                "Accept": "text/html,application/xhtml+xml",
-                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-                "Cache-Control": "no-cache",
-            },
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                html = resp.read().decode("utf-8", errors="ignore")
-            results = self._parse_baidu(html, num)
-            if not results:
-                print(f"  ⚠ 百度搜索返回0条结果 (HTML {len(html)} bytes)")
-            return results
-        except Exception as e:
-            print(f"  ⚠ 百度搜索失败: {e}")
+    def _search_bing(self, query: str, num: int) -> List[Dict[str, str]]:
+        """Bing中国版搜索（国内直连，反爬最宽松）"""
+        url = f"https://cn.bing.com/search?q={urllib.parse.quote(query)}&count={num}"
+        html = self._fetch_url(url)
+        if not html:
+            # curl兜底
+            html = self._fetch_with_curl(url)
+        if not html:
+            print(f"  ⚠ Bing搜索抓取失败 [{query}]")
             return []
-
-    def _parse_baidu(self, html: str, num: int) -> List[Dict[str, str]]:
-        """解析百度搜索结果"""
-        results = []
-
-        # 百度搜索结果多种格式，逐个尝试
-        # 格式1: <h3 class="t"><a href="...">title</a></h3>
-        # 格式2: <h3><a href="...">title</a></h3>
-        title_patterns = [
-            re.compile(r'<h3[^>]*>\s*<a[^>]*>(.*?)</a>', re.DOTALL),
-            re.compile(r'<h3[^>]*>(.*?)</h3>', re.DOTALL),
-        ]
-        titles = []
-        for tp in title_patterns:
-            titles = tp.findall(html)
-            if titles:
-                break
-
-        # 摘要多种格式
-        snippet_patterns = [
-            re.compile(r'class="content-right[^"]*"[^>]*>(.*?)</span>', re.DOTALL),
-            re.compile(r'class="c-abstract[^"]*"[^>]*>(.*?)</(?:div|span)>', re.DOTALL),
-            re.compile(r'<span class="c-color-text"[^>]*>(.*?)</span>', re.DOTALL),
-        ]
-        snippets = []
-        for sp in snippet_patterns:
-            snippets = sp.findall(html)
-            if snippets:
-                break
-
-        for i in range(min(num, len(titles))):
-            title = self._strip_html(titles[i]).strip()
-            snippet = ""
-            if i < len(snippets):
-                snippet = self._strip_html(snippets[i]).strip()
-            if title and len(title) > 2:
-                results.append({
-                    "title": title,
-                    "snippet": snippet[:200] if snippet else "",
-                })
-
+        results = self._parse_bing(html, num)
+        if not results:
+            print(f"  ⚠ Bing搜索返回0条结果 (HTML {len(html)} bytes)")
         return results
 
-    def _search_bing(self, query: str, num: int) -> List[Dict[str, str]]:
-        """Bing中国版搜索（国内直连，无需代理）"""
-        url = f"https://cn.bing.com/search?q={urllib.parse.quote(query)}&count={num}"
-        req = urllib.request.Request(
-            url,
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (X11; Linux x86_64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/125.0.0.0 Safari/537.36"
-                ),
-                "Accept": "text/html,application/xhtml+xml",
-                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-                "Cache-Control": "no-cache",
-            },
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                html = resp.read().decode("utf-8", errors="ignore")
-            results = self._parse_bing(html, num)
-            if not results:
-                print(f"  ⚠ Bing搜索返回0条结果 (HTML {len(html)} bytes)")
-            return results
-        except Exception as e:
-            print(f"  ⚠ Bing搜索失败: {e}")
-            return []
-
     def _parse_bing(self, html: str, num: int) -> List[Dict[str, str]]:
-        """解析Bing搜索结果（多种格式兼容）"""
+        """解析Bing搜索结果"""
         results = []
 
-        # Bing HTML结构经常变，多种正则兼容
-        # 格式1: <h2><a href="...">title</a></h2>
-        # 格式2: <h2 class="..."><a href="...">title</a></h2>
-        title_patterns = [
-            re.compile(r'<h2[^>]*>\s*<a[^>]*>(.*?)</a>', re.DOTALL),
-            re.compile(r'class="b_algo"[^>]*>.*?<a[^>]*>(.*?)</a>', re.DOTALL),
-            re.compile(r'<h2[^>]*>(.*?)</h2>', re.DOTALL),
-        ]
-        titles = []
-        for tp in title_patterns:
-            titles = tp.findall(html)
-            if titles:
-                break
+        # Bing当前结构: <li class="b_algo">...<h2><a href="...">title</a></h2>...<p>snippet</p>...</li>
+        # 提取标题+链接
+        title_pattern = re.compile(
+            r'<h2[^>]*>\s*<a[^>]*>(.*?)</a>', re.DOTALL
+        )
+        titles = title_pattern.findall(html)
 
-        # 摘要多种格式
+        # 摘要：多种格式
         snippet_patterns = [
             re.compile(r'<div class="b_caption"[^>]*>.*?<p[^>]*>(.*?)</p>', re.DOTALL | re.IGNORECASE),
-            re.compile(r'class="b_lineclamp[^"]*"[^>]*>(.*?)</p>', re.DOTALL),
-            re.compile(r'class="b_caption"[^>]*>(.*?)</div>', re.DOTALL | re.IGNORECASE),
+            re.compile(r'class="b_lineclamp[^\"]*"[^>]*>(.*?)</p>', re.DOTALL),
+            re.compile(r'<p class="b_lineclamp[^"]*">(.*?)</p>', re.DOTALL),
         ]
         snippets = []
         for sp in snippet_patterns:
@@ -188,42 +169,125 @@ class WebSearcher:
 
         return results
 
+    def _search_sogou(self, query: str, num: int) -> List[Dict[str, str]]:
+        """搜狗搜索（国内直连）"""
+        url = f"https://www.sogou.com/web?query={urllib.parse.quote(query)}&num={num}"
+        html = self._fetch_url(url)
+        if not html:
+            html = self._fetch_with_curl(url)
+        if not html:
+            print(f"  ⚠ Sogou搜索抓取失败 [{query}]")
+            return []
+        results = self._parse_sogou(html, num)
+        if not results:
+            print(f"  ⚠ Sogou搜索返回0条结果 (HTML {len(html)} bytes)")
+        return results
+
+    def _parse_sogou(self, html: str, num: int) -> List[Dict[str, str]]:
+        """解析搜狗搜索结果"""
+        results = []
+        # 搜狗结构: <h3 class="vr-title">...<a href="...">title</a>...</h3>
+        title_patterns = [
+            re.compile(r'<h3[^>]*class="[^"]*vr-title[^"]*"[^>]*>.*?<a[^>]*>(.*?)</a>', re.DOTALL),
+            re.compile(r'<h3[^>]*>.*?<a[^>]*>(.*?)</a>', re.DOTALL),
+        ]
+        titles = []
+        for tp in title_patterns:
+            titles = tp.findall(html)
+            if titles:
+                break
+
+        # 摘要
+        snippet_patterns = [
+            re.compile(r'<p class="str-info[^"]*"[^>]*>(.*?)</p>', re.DOTALL),
+            re.compile(r'class="str-text-info"[^>]*>(.*?)</p>', re.DOTALL),
+            re.compile(r'<p[^>]*class="[^"]*str[^"]*"[^>]*>(.*?)</p>', re.DOTALL),
+        ]
+        snippets = []
+        for sp in snippet_patterns:
+            snippets = sp.findall(html)
+            if snippets:
+                break
+
+        for i in range(min(num, len(titles))):
+            title = self._strip_html(titles[i]).strip()
+            snippet = ""
+            if i < len(snippets):
+                snippet = self._strip_html(snippets[i]).strip()
+            if title and len(title) > 3:
+                results.append({
+                    "title": title,
+                    "snippet": snippet[:200] if snippet else "",
+                })
+        return results
+
+    def _search_baidu(self, query: str, num: int) -> List[Dict[str, str]]:
+        """百度搜索（反爬较严，作为第三选择）"""
+        url = f"https://www.baidu.com/s?wd={urllib.parse.quote(query)}&rn={num}"
+        html = self._fetch_url(url)
+        if not html:
+            html = self._fetch_with_curl(url)
+        if not html:
+            print(f"  ⚠ 百度搜索抓取失败 [{query}]")
+            return []
+        # 检查是否是反爬页面（小于3KB大概率是）
+        if len(html) < 3000:
+            print(f"  ⚠ 百度疑似返回反爬页面 (HTML {len(html)} bytes)")
+            return []
+        results = self._parse_baidu(html, num)
+        if not results:
+            print(f"  ⚠ 百度搜索返回0条结果 (HTML {len(html)} bytes)")
+        return results
+
+    def _parse_baidu(self, html: str, num: int) -> List[Dict[str, str]]:
+        """解析百度搜索结果"""
+        results = []
+        title_patterns = [
+            re.compile(r'<h3[^>]*>\s*<a[^>]*>(.*?)</a>', re.DOTALL),
+            re.compile(r'<h3[^>]*>(.*?)</h3>', re.DOTALL),
+        ]
+        titles = []
+        for tp in title_patterns:
+            titles = tp.findall(html)
+            if titles:
+                break
+
+        snippet_patterns = [
+            re.compile(r'class="content-right[^"]*"[^>]*>(.*?)</span>', re.DOTALL),
+            re.compile(r'class="c-abstract[^"]*"[^>]*>(.*?)</(?:div|span)', re.DOTALL),
+            re.compile(r'<span class="c-color-text"[^>]*>(.*?)</span>', re.DOTALL),
+        ]
+        snippets = []
+        for sp in snippet_patterns:
+            snippets = sp.findall(html)
+            if snippets:
+                break
+
+        for i in range(min(num, len(titles))):
+            title = self._strip_html(titles[i]).strip()
+            snippet = ""
+            if i < len(snippets):
+                snippet = self._strip_html(snippets[i]).strip()
+            if title and len(title) > 2:
+                results.append({
+                    "title": title,
+                    "snippet": snippet[:200] if snippet else "",
+                })
+        return results
+
     def _search_ddg(self, query: str, num: int) -> List[Dict[str, str]]:
         """DuckDuckGo搜索（需要代理）"""
         url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
-        req = urllib.request.Request(
-            url,
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (X11; Linux x86_64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/125.0.0.0 Safari/537.36"
-                ),
-                "Accept": "text/html,application/xhtml+xml",
-                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-            },
-        )
-
-        # 配置代理（如果设置了）
-        if self.proxy:
-            proxy_handler = urllib.request.ProxyHandler({
-                "http": self.proxy,
-                "https": self.proxy,
-            })
-            opener = urllib.request.build_opener(proxy_handler)
-        else:
-            opener = urllib.request.build_opener()
-
-        try:
-            with opener.open(req, timeout=self.timeout) as resp:
-                html = resp.read().decode("utf-8", errors="ignore")
-            results = self._parse_ddg(html, num)
-            if not results:
-                print(f"  ⚠ DDG搜索返回0条结果 (HTML {len(html)} bytes)")
-            return results
-        except Exception as e:
-            print(f"  ⚠ DuckDuckGo搜索失败: {e}")
+        html = self._fetch_url(url)
+        if not html:
+            html = self._fetch_with_curl(url)
+        if not html:
+            print(f"  ⚠ DDG搜索抓取失败 [{query}]")
             return []
+        results = self._parse_ddg(html, num)
+        if not results:
+            print(f"  ⚠ DDG搜索返回0条结果 (HTML {len(html)} bytes)")
+        return results
 
     def _parse_ddg(self, html: str, num: int) -> List[Dict[str, str]]:
         """解析DuckDuckGo HTML结果页"""
@@ -232,7 +296,7 @@ class WebSearcher:
             r'class="result__a"[^>]*>(.*?)</a>', re.DOTALL
         )
         snippet_pattern = re.compile(
-            r'class="result__snippet"[^>]*>(.*?)</(?:a|span)>', re.DOTALL
+            r'class="result__snippet"[^>]*>(.*?)</(?:a|span)', re.DOTALL
         )
         titles = title_pattern.findall(html)
         snippets = snippet_pattern.findall(html)
@@ -333,30 +397,38 @@ if __name__ == "__main__":
     import sys
 
     print("=" * 50)
-    print("WebSearcher 独立测试")
+    print("WebSearcher 独立测试（四引擎）")
     print("=" * 50)
 
     config = {
         "timeout": 15,
-        "proxy": "http://127.0.0.1:7890",
+        "proxy": "",  # 本地测试不需要代理
     }
     searcher = WebSearcher(config)
 
     query = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else "2026年8月 有趣新闻 科技"
     print(f"\n搜索: {query}\n")
 
-    # 测试百度
-    print("--- 百度 ---")
-    baidu_results = searcher._search_baidu(query, 5)
-    for i, r in enumerate(baidu_results, 1):
+    # 测试Bing
+    print("--- Bing中国版 ---")
+    bing_results = searcher._search_bing(query, 5)
+    for i, r in enumerate(bing_results, 1):
         print(f"  [{i}] {r['title']}")
         if r['snippet']:
             print(f"      {r['snippet'][:80]}")
 
-    # 测试Bing
-    print("\n--- Bing ---")
-    bing_results = searcher._search_bing(query, 5)
-    for i, r in enumerate(bing_results, 1):
+    # 测试Sogou
+    print("\n--- 搜狗 ---")
+    sogou_results = searcher._search_sogou(query, 5)
+    for i, r in enumerate(sogou_results, 1):
+        print(f"  [{i}] {r['title']}")
+        if r['snippet']:
+            print(f"      {r['snippet'][:80]}")
+
+    # 测试百度
+    print("\n--- 百度 ---")
+    baidu_results = searcher._search_baidu(query, 5)
+    for i, r in enumerate(baidu_results, 1):
         print(f"  [{i}] {r['title']}")
         if r['snippet']:
             print(f"      {r['snippet'][:80]}")
