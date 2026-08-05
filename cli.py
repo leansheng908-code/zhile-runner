@@ -15,6 +15,7 @@ Phase 3 新增：
 """
 
 import sys
+import os
 import json
 from datetime import datetime
 from nl_scheduler import CronParser
@@ -2742,6 +2743,8 @@ class CLI:
                     params = list(sig.parameters.keys())
                     if "dt" in params or len(params) == 1:
                         result = func(now)
+                    elif "timestamp_str" in params:
+                        result = func(now.strftime("%Y-%m-%d %H:%M"))
                     elif len(params) == 5:
                         result = func(now.year, now.month, now.day, now.hour, now.minute)
                     elif len(params) == 4:
