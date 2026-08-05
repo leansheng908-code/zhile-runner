@@ -212,6 +212,25 @@ class BackgroundPlugin(ABC):
             "error_count": self._error_count,
         }
 
+    # ─── P0.56: 能力暴露 ──────────────────────────
+
+    def get_capabilities(self) -> Optional[dict]:
+        """返回能力描述符，供Skills系统注册为T3技能。
+
+        子类覆盖此方法，返回格式:
+            {
+                "name": "stock_query",          # 能力名称
+                "description": "实时股价查询",    # 人类可读描述
+                "triggers": ["股价", "股票"],     # 触发关键词列表
+                "plugin": "stock_monitor",       # 插件名（即self.name）
+                "method": "query_report",        # 可调用的方法名
+                "category": "finance",           # 类别（可选）
+            }
+
+        返回None表示此插件不暴露对话能力。
+        """
+        return None
+
 
 class PluginManager:
     """
@@ -399,6 +418,50 @@ class PluginManager:
         """列出所有已注册插件名称"""
         with self._lock:
             return list(self._plugins.keys())
+
+    # ─── P0.56: 能力桥接 ──────────────────────────
+
+    def get_all_capabilities(self) -> List[dict]:
+        """聚合所有已注册插件的能力描述符。
+
+        Returns:
+            list[dict]: 能力描述符列表（跳过返回None的插件）
+        """
+        with self._lock:
+            plugins = list(self._plugins.values())
+        caps = []
+        for plugin in plugins:
+            try:
+                cap = plugin.get_capabilities()
+                if cap:
+                    # 自动补全 plugin 字段
+                    cap.setdefault("plugin", plugin.name)
+                    caps.append(cap)
+            except Exception as e:
+                print(f"  ⚠ 插件 '{plugin.name}' get_capabilities 异常: {e}")
+        return caps
+
+    def call_capability(self, plugin_name: str, method_name: str, *args, **kwargs):
+        """调用指定插件的指定方法。
+
+        Args:
+            plugin_name: 插件名称
+            method_name: 方法名
+
+        Returns:
+            方法返回值，或None（插件不存在/方法不存在/调用异常）
+        """
+        plugin = self.get_plugin(plugin_name)
+        if plugin is None:
+            return None
+        method = getattr(plugin, method_name, None)
+        if method is None or not callable(method):
+            return None
+        try:
+            return method(*args, **kwargs)
+        except Exception as e:
+            print(f"  ⚠ 插件 '{plugin_name}' 方法 '{method_name}' 调用异常: {e}")
+            return None
 
     # ─── 从config.json加载 ──────────────────────
 
