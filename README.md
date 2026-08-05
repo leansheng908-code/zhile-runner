@@ -868,3 +868,29 @@ netstat -ano | findstr 6199
 ---
 
 *知乐人格DNA · 代码级运行器 · 让AI角色在你的电脑上活起来。*
+
+## 开发者测试
+
+项目包含核心模块集成测试，覆盖10个模块34个测试用例：
+
+```bash
+# 方式1：直接运行（无需安装pytest）
+python3 tests/test_core_modules.py
+
+# 方式2：使用pytest（需 pip install pytest）
+python3 -m pytest tests/ -v
+```
+
+测试覆盖模块：
+- context_compressor（上下文压缩器）
+- background_plugin（后台插件系统）
+- stock_monitor（股票盯盘插件）
+- skill_evolution（自进化Skills + P0.56插件桥接）
+- context_assembler（上下文装配器）
+- psi_engine（PSI需求引擎）
+- label_unifier（标签统一接口）
+- fleeting_moment（瞬时感知层）
+- memory_system（记忆系统）
+- free_will（自由五层框架）
+
+提交代码前建议运行测试确保无回归。配合 `.pre-commit-config.yaml` 使用效果更佳。
