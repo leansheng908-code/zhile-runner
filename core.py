@@ -1759,20 +1759,28 @@ class ZhileCore:
     # ─── P0.26 Phase 2: 代码执行沙箱 ──────────
 
     def code_run(self, code: str, timeout: int = None) -> dict:
-        """在沙箱中执行代码"""
+        """在沙箱中执行代码（P0.46④: 执行后自动写后自检）"""
         if not self.code_executor:
             return {"success": False, "error": "沙箱未启用"}
+        t_before = time.time()
         result = self.code_executor.execute(code, timeout=timeout)
-        return result.to_dict()
+        ret = result.to_dict()
+        # P0.46④: 自动写后自检
+        ret["lint"] = self._auto_lint(t_before)
+        return ret
 
     def code_debug(self, code: str, max_iterations: int = None,
                    timeout: int = None) -> dict:
-        """在沙箱中执行代码并自动调试"""
+        """在沙箱中执行代码并自动调试（P0.46④: 执行后自动写后自检）"""
         if not self.debug_loop:
             return {"success": False, "error": "调试循环未启用"}
+        t_before = time.time()
         result = self.debug_loop.run(code, max_iterations=max_iterations,
                                      timeout=timeout)
-        return result.to_dict()
+        ret = result.to_dict()
+        # P0.46④: 自动写后自检
+        ret["lint"] = self._auto_lint(t_before)
+        return ret
 
     def code_status(self) -> dict:
         """沙箱与调试循环状态"""
@@ -1792,6 +1800,42 @@ class ZhileCore:
         if not self.debug_loop:
             return []
         return self.debug_loop.get_history(limit)
+
+    # ─── P0.46④: 自动写后自检 ─────────────────
+
+    def _auto_lint(self, t_before: float) -> dict:
+        """代码执行后自动检查被修改的文件。
+
+        扫描运行器根目录下 mtime > t_before 的 .py/.json/.yaml/.xml 文件，
+        执行语法检查。无文件被修改时返回空结果。
+
+        Args:
+            t_before: 执行前的时间戳。
+
+        Returns:
+            汇总字典 {checked, passed, failed, errors}。
+        """
+        if not self.post_write_linter:
+            return {"checked": 0, "passed": 0, "failed": 0, "errors": []}
+
+        runner_dir = str(Path(self.config.get("runner_dir", ".")).resolve())
+        results = self.post_write_linter.lint_recently_modified(
+            runner_dir, t_before
+        )
+
+        if not results:
+            return {"checked": 0, "passed": 0, "failed": 0, "errors": []}
+
+        summary = PostWriteLinter.summarize_results(results)
+        return {
+            "checked": summary["total"],
+            "passed": summary["passed"] + summary["warned"],
+            "failed": summary["failed"],
+            "errors": [
+                {"file": r.filepath, "errors": r.errors}
+                for r in results if not r.success
+            ],
+        }
 
     # ─── 记忆 ─────────────────────────────────
 
