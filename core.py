@@ -88,6 +88,9 @@ from approval_gate import ApprovalGate, RiskLevel
 # P0.26 Phase 3: 架构自认知
 from architecture_map import ArchitectureMap
 
+# P0.26 Phase 4: 自主生长闭环引擎
+from growth_engine import GrowthEngine
+
 # P0.24: 易经认知编码系统
 import sys as _sys, os as _os
 _yi_jing_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'yi_jing')
@@ -556,6 +559,15 @@ class ZhileCore:
         except Exception as e:
             print(f"⚠ [Core] ApprovalGate 初始化失败，降级跳过: {e}")
             self.approval_gate = None
+
+        # ─── P0.26 Phase 4: 自主生长闭环引擎 ────
+        self.growth_engine = None
+        try:
+            self.growth_engine = GrowthEngine(self)
+            print("[Core] GrowthEngine 已初始化 (自主生长闭环)")
+        except Exception as e:
+            print(f"⚠ [Core] GrowthEngine 初始化失败，降级跳过: {e}")
+            self.growth_engine = None
 
         # ─── UX: 消息防抖/拆分/严肃模式 ─────────
         self.serious_mode_until = 0
@@ -2120,6 +2132,33 @@ class ZhileCore:
         if not self.debug_loop:
             return []
         return self.debug_loop.get_history(limit)
+
+    # ─── P0.26 Phase 4: 自主生长闭环 ───────────
+
+    def grow_capability(self, desc: str) -> dict:
+        """启动自主生长闭环（供 CLI 调用）
+
+        Args:
+            desc: 能力需求描述
+
+        Returns:
+            生长结果 dict
+        """
+        if not self.growth_engine:
+            return {"success": False, "error": "GrowthEngine 未启用"}
+        return self.growth_engine.grow(desc)
+
+    def grow_status(self) -> dict:
+        """查看当前生长管道状态"""
+        if not self.growth_engine:
+            return {"enabled": False}
+        return self.growth_engine.get_status()
+
+    def grow_history(self) -> list:
+        """查看历史生长记录"""
+        if not self.growth_engine:
+            return []
+        return self.growth_engine.get_history()
 
     # ─── P0.46④: 自动写后自检 ─────────────────
 
