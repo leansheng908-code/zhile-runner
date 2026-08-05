@@ -5,6 +5,7 @@ Phase 1: 简单滑动窗口
 Phase 2: 增加记忆注入层
 Phase 3: 增加 PSI 状态注入
 P0.8:   增加动态记忆检索（每条消息实体匹配→扩散激活→动态召回）
+P0.21:  原地压缩+硬上限（超阈值时旧消息摘要为SystemMessage，保留最近轮次原文）
 
 职责：
   1. 维护对话历史（user/assistant消息对）
@@ -12,6 +13,7 @@ P0.8:   增加动态记忆检索（每条消息实体匹配→扩散激活→动
   3. 拼装完整messages（system + memory + psi + history）
   4. 动态更新记忆上下文（根据用户消息内容）
   5. 提供统计信息
+  6. P0.21: 超阈值时原地压缩旧消息为摘要，保留最近N轮原文，硬上限兜底
 """
 
 from typing import List, Dict
@@ -35,6 +37,15 @@ class ContextAssembler:
         self.system_prompt = system_prompt
         self.max_history = max_history
         self.memory_context = memory_context
+
+        # P0.21: 原地压缩 + 硬上限
+        self.compressed_summary: str = ""          # 累积的压缩摘要
+        self.compression_threshold: int = 20      # 触发压缩的消息对数阈值
+        self.keep_recent: int = 10                 # 压缩后保留最近N轮原文
+        self.hard_limit: int = 40                  # 硬上限消息对数（超过时强制截断）
+        self._compressor_llm = None                # 压缩用LLM（可选）
+        self._compression_count: int = 0           # 已执行压缩次数
+
         self.psi_context = psi_context
         self.arc_light_context = arc_light_context
         self.somatic_context = somatic_context
@@ -105,7 +116,139 @@ class ContextAssembler:
         self.history = list(history)
         self._trim()
 
+    # ── P0.21: 原地压缩 + 硬上限 ──────────────────────────────
+
+    def set_compressor_llm(self, llm):
+        """设置压缩用LLM provider（需支持 .invoke() 或同步调用接口）"""
+        self._compressor_llm = llm
+
+    def compress_history(self):
+        """
+        主压缩方法：
+        1. 检查是否超过 compression_threshold
+        2. 如果超过，将旧消息（除最近 keep_recent 轮）用LLM压缩为摘要
+        3. 摘要拼接到 compressed_summary（累积合并）
+        4. 历史只保留最近 keep_recent 轮
+        5. 如果LLM不可用，用简单截断+硬上限兜底
+        """
+        msg_pairs = len(self.history) // 2
+        if msg_pairs <= self.compression_threshold:
+            return  # 未超阈值，无需压缩
+
+        # 计算需要保留的最近消息数（keep_recent轮 = keep_recent*2条）
+        keep_count = self.keep_recent * 2
+        old_messages = self.history[:-keep_count] if keep_count < len(self.history) else []
+
+        if not old_messages:
+            return
+
+        if self._compressor_llm is not None:
+            # 有LLM：压缩旧消息为摘要
+            try:
+                new_summary = self._summarize_messages(old_messages)
+                if new_summary:
+                    # 累积合并旧摘要+新摘要
+                    if self.compressed_summary:
+                        self.compressed_summary = self._merge_summaries(
+                            self.compressed_summary, new_summary
+                        )
+                    else:
+                        self.compressed_summary = new_summary
+                    # 历史只保留最近 keep_recent 轮
+                    self.history = self.history[-keep_count:]
+                    self._compression_count += 1
+                    return
+            except Exception:
+                pass  # LLM压缩失败，降级到硬上限兜底
+
+        # 无LLM或压缩失败：硬上限兜底
+        self._hard_trim()
+
+    def _summarize_messages(self, messages: List[Dict[str, str]]) -> str:
+        """用LLM将多条消息摘要为一段文字"""
+        # 构建对话文本
+        lines = []
+        for msg in messages:
+            role = "主人" if msg["role"] == "user" else "我"
+            lines.append(f"{role}: {msg['content']}")
+        conversation_text = "\n".join(lines)
+
+        # 超长文本截断（有界map-reduce的简化版：直接截断到安全长度）
+        max_input_chars = 8000
+        if len(conversation_text) > max_input_chars:
+            conversation_text = conversation_text[:max_input_chars] + "\n...（已截断）"
+
+        prompt = (
+            "请将以下对话历史压缩为简洁的摘要，保留关键信息、重要事实、"
+            "用户偏好和已达成的共识。用中文输出，不超过500字。\n\n"
+            "对话内容：\n"
+            + conversation_text
+        )
+
+        # 兼容多种LLM调用方式
+        llm = self._compressor_llm
+        result = None
+
+        if hasattr(llm, "invoke"):
+            result = llm.invoke(prompt)
+        elif callable(llm):
+            result = llm(prompt)
+        else:
+            return ""
+
+        if isinstance(result, str):
+            return result.strip()
+        elif hasattr(result, "content"):
+            return result.content.strip()
+        elif isinstance(result, dict) and "content" in result:
+            return result["content"].strip()
+        else:
+            return str(result).strip() if result else ""
+
+    def _merge_summaries(self, old_summary: str, new_summary: str) -> str:
+        """合并旧摘要和新摘要（简化版：拼接+可选LLM再压缩）"""
+        merged = f"【早期摘要】\n{old_summary}\n\n【近期摘要】\n{new_summary}"
+
+        # 如果合并后过长，用LLM再压缩一次
+        if len(merged) > 2000 and self._compressor_llm is not None:
+            try:
+                prompt = (
+                    "请将以下两段对话摘要合并为一段连贯的摘要，"
+                    "保留所有关键信息，用中文输出，不超过500字：\n\n"
+                    + merged
+                )
+                llm = self._compressor_llm
+                if hasattr(llm, "invoke"):
+                    result = llm.invoke(prompt)
+                elif callable(llm):
+                    result = llm(prompt)
+                else:
+                    return merged
+                if isinstance(result, str):
+                    return result.strip()
+                elif hasattr(result, "content"):
+                    return result.content.strip()
+                else:
+                    return str(result).strip() if result else merged
+            except Exception:
+                return merged
+
+        return merged
+
+    def _hard_trim(self):
+        """硬上限兜底：如果历史超过 hard_limit*2 条，直接截断到 hard_limit*2"""
+        limit = self.hard_limit * 2
+        if len(self.history) > limit:
+            self.history = self.history[-limit:]
+
+    # ── P0.21 END ─────────────────────────────────────────────
+
     def _trim(self):
+        # P0.21: 先尝试原地压缩（如果启用）
+        self.compress_history()
+        # P0.21: 硬上限兜底
+        self._hard_trim()
+        # 基础滑动窗口逻辑
         limit = self.max_history * 2
         if len(self.history) > limit:
             self.history = self.history[-limit:]
@@ -129,6 +272,15 @@ class ContextAssembler:
                 "以下是你应该记住的关于主人和自己的重要信息，"
                 "对话中自然运用但不要机械复述：\n\n"
                 + self.memory_context
+            )
+
+        # P0.21: 注入压缩摘要（放在记忆之后、PSI之前）
+        if self.compressed_summary:
+            prompt += (
+                "\n\n---\n"
+                "## 对话历史摘要\n\n"
+                "以下是之前对话的压缩摘要，帮助你回忆较早的对话内容：\n\n"
+                + self.compressed_summary
             )
 
         if self.psi_context:
@@ -241,4 +393,11 @@ class ContextAssembler:
             "has_hexagram": bool(self.hexagram_context),
             "has_fleeting_moment": bool(self.fleeting_moment_context),
             "has_desire": bool(self.desire_context),
+            # P0.21: 压缩状态
+            "compressed": bool(self.compressed_summary),
+            "compression_count": self._compression_count,
+            "compressed_summary_chars": len(self.compressed_summary),
+            "compression_threshold": self.compression_threshold,
+            "keep_recent": self.keep_recent,
+            "hard_limit": self.hard_limit,
         }
