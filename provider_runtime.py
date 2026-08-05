@@ -20,11 +20,49 @@ P0.60: Provider Runtime 执行层
 """
 
 import threading
+import time
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
 
 from work_ledger import WorkLedger
 from narration_events import NarrationEmitter
+
+
+# ─── P0.61: 重试策略 ─────────────────────────
+
+@dataclass
+class RetryPolicy:
+    """重试策略配置
+
+    Attributes:
+        max_retries: 最大重试次数（0=不重试）
+        backoff: 退避秒数列表，按索引取值，超出索引取最后一个
+    """
+
+    max_retries: int = 0
+    backoff: List[float] = field(default_factory=list)
+
+    def get_backoff(self, attempt: int) -> float:
+        """获取指定重试次数的退避秒数
+
+        Args:
+            attempt: 重试次数（从0开始）
+
+        Returns:
+            退避秒数
+        """
+        if not self.backoff:
+            return 0.0
+        return self.backoff[min(attempt, len(self.backoff) - 1)]
+
+
+# ─── 默认重试策略 ─────────────────────────────
+
+DEFAULT_RETRY_POLICIES: Dict[str, RetryPolicy] = {
+    "search": RetryPolicy(max_retries=3, backoff=[0, 2, 5, 10]),
+    "code": RetryPolicy(max_retries=1, backoff=[0, 5]),
+}
 
 
 # ─── Provider 基类 ────────────────────────────
@@ -176,6 +214,18 @@ class ProviderRuntime:
 
         self._enabled = config.get("enabled", True)
 
+        # P0.61: 重试策略 — 加载默认策略，可被 config 覆盖
+        self._retry_policies: Dict[str, RetryPolicy] = dict(DEFAULT_RETRY_POLICIES)
+        retry_overrides = config.get("retry_overrides", {})
+        for provider_name, policy_dict in retry_overrides.items():
+            try:
+                self._retry_policies[provider_name] = RetryPolicy(
+                    max_retries=int(policy_dict.get("max_retries", 0)),
+                    backoff=list(policy_dict.get("backoff", [])),
+                )
+            except (ValueError, TypeError) as e:
+                print(f"  ⚠ [ProviderRuntime] retry_overrides 解析失败 ({provider_name}): {e}")
+
     # ─── Provider 注册 ────────────────────────
 
     def register(self, provider: Provider):
@@ -223,6 +273,8 @@ class ProviderRuntime:
     def dispatch_sync(self, provider_name: str, task: dict) -> dict:
         """同步派发任务（阻塞等待结果）
 
+        P0.61 增强：支持重试策略，按 Provider 类型的 RetryPolicy 自动重试。
+
         Args:
             provider_name: Provider 名称
             task: 任务参数dict
@@ -245,13 +297,45 @@ class ProviderRuntime:
             except Exception as e:
                 print(f"  ⚠ [ProviderRuntime] ledger 记录失败: {e}")
 
-        # 执行
-        try:
-            result = provider.execute(task)
-            status = "completed" if result.get("success", True) else "failed"
-        except Exception as e:
-            result = {"success": False, "error": str(e)}
-            status = "failed"
+        # P0.61: 获取重试策略
+        policy = self._retry_policies.get(provider_name, RetryPolicy(max_retries=0))
+        max_retries = policy.max_retries
+
+        # 执行（含重试）
+        result = None
+        status = "failed"
+        for attempt in range(max_retries + 1):
+            try:
+                result = provider.execute(task)
+                if result.get("success", True):
+                    status = "completed"
+                    break
+                else:
+                    status = "failed"
+            except Exception as e:
+                result = {"success": False, "error": str(e)}
+                status = "failed"
+
+            # 还有重试机会
+            if attempt < max_retries:
+                backoff = policy.get_backoff(attempt)
+                # 发送重试 narration event
+                if self._narration:
+                    try:
+                        self._narration.emit_provider_retry(
+                            provider_name=provider_name,
+                            attempt=attempt + 1,
+                            max_retries=max_retries,
+                            next_backoff=backoff,
+                        )
+                    except Exception:
+                        pass
+
+                if backoff > 0:
+                    time.sleep(backoff)
+
+                print(f"  [ProviderRuntime] {provider_name} 重试 "
+                      f"({attempt + 1}/{max_retries})，等待 {backoff}s...")
 
         # 记录结果
         if self.ledger and work_id and attempt_id:
