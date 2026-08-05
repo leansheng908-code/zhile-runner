@@ -50,7 +50,18 @@ body {
   text-align: center;
   border-bottom: 1px solid var(--border);
 }
-.sidebar-header .cat { font-size: 28px; margin-bottom: 4px; }
+.sidebar-header .avatar-emoji {
+  font-size: 48px; margin-bottom: 4px;
+  display: inline-block; transition: transform 0.3s;
+  animation: avatarBounce 2s ease-in-out infinite;
+}
+@keyframes avatarBounce {
+  0%,100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+.sidebar-header .avatar-label {
+  font-size: 11px; color: var(--cyan); margin-bottom: 2px;
+}
 .sidebar-header h1 { font-size: 18px; color: var(--pink); }
 .sidebar-header .ver { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
 
@@ -252,7 +263,8 @@ body {
 <!-- 侧边栏 -->
 <div class="sidebar" id="sidebar">
   <div class="sidebar-header">
-    <div class="cat">🐱</div>
+    <div class="avatar-emoji" id="avatar-emoji">🐱</div>
+    <div class="avatar-label" id="avatar-label">日常</div>
     <h1>知乐</h1>
     <div class="ver" id="ver">本地运行器</div>
   </div>
@@ -336,6 +348,12 @@ async function init() {
     document.getElementById('mem-info').textContent =
       `记忆: ${data.memory_active||0}活跃 / ${data.memory_total||0}总计`;
     updatePSI(data.psi || {});
+    // 拉取avatar表情
+    try {
+      const avRes = await fetch('/api/avatar');
+      const avData = await avRes.json();
+      updateAvatar(avData);
+    } catch(e) {}
   } catch(e) {
     document.getElementById('status-text').textContent = '连接失败';
   }
@@ -372,6 +390,15 @@ function updatePSI(psi) {
     document.getElementById('psi-frame').textContent =
       `意识帧: ${psi.consciousness_frame}`;
   }
+}
+
+// ─── Avatar表情更新 ───
+function updateAvatar(avatar) {
+  if (!avatar) return;
+  const emojiEl = document.getElementById('avatar-emoji');
+  const labelEl = document.getElementById('avatar-label');
+  if (avatar.emoji && emojiEl) emojiEl.textContent = avatar.emoji;
+  if (avatar.label && labelEl) labelEl.textContent = avatar.label;
 }
 
 // ─── 发送消息 ───
@@ -449,6 +476,7 @@ async function send() {
             if (data.done) {
               if (data.psi) updatePSI(data.psi);
               if (data.status) updateStatus(data.status);
+              if (data.avatar) updateAvatar(data.avatar);
             }
           } catch(e) { console.log('parse error:', e, line); }
         }
