@@ -119,6 +119,10 @@ class HexagramTracker:
         Returns:
             dict: 与update()同构，额外包含divination和moving_line信息
         """
+        import sys, os
+        _yi_dir = os.path.join(os.path.dirname(__file__))
+        if _yi_dir not in sys.path:
+            sys.path.insert(0, _yi_dir)
         from yi_jing_label_dictionary import meihua_qigua
         
         if dt is None:
@@ -143,10 +147,12 @@ class HexagramTracker:
         # 变卦 = 动爻翻转（梅花易数法，变卦始终存在）
         bian_binary = self._flip_yao(new_binary, moving_line)
         yao_names = ["初爻", "二爻", "三爻", "四爻", "五爻", "上爻"]
+        dim_names = ["活力", "情绪", "自主性", "胜任感", "确定性", "归属感"]
         result["bian"] = {
             "moving_line": moving_line,
             "changed_yao": [{
                 "position": yao_names[moving_line - 1],
+                "dimension": dim_names[moving_line - 1],
                 "direction": "阳→阴" if new_binary[moving_line - 1] == "1" else "阴→阳",
             }],
             "changed_count": 1,
@@ -443,8 +449,4 @@ if __name__ == "__main__":
     print(f"更新次数: {summary['update_count']}")
     print(f"变卦历史: {summary['history_count']}次")
     if summary['last_change']:
-        print(f"  最近: {summary['last_change']['from_name']} → {summary['last_change']['to_name']}")
-    
-    # 热插拔测试
-    print("\n--- 热插拔测试 ---")
-    print(tracker.reload_custom())
+        print(f"  最近: {summary['last_change']['from_n
