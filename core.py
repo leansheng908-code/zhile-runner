@@ -811,12 +811,13 @@ class ZhileCore:
         if self.fleeting_moment:
             self.ctx.clear_fleeting_moment()
 
-        # P0.40 Phase 2: 清空拒绝权提示 + 更新交互时间
-        self.ctx.clear_free_will_hint()
-        self._last_interaction_time = time.time()
-
-        # P0.40 Phase 3: 空闲创造检查 — 30分钟无交互时触发
-        self._maybe_idle_creation()
+        # P0.40 Phase 2+3: 清空拒绝权提示 + 更新交互时间 + 空闲创造检查
+        try:
+            self.ctx.clear_free_will_hint()
+            self._last_interaction_time = time.time()
+            self._maybe_idle_creation()
+        except Exception:
+            pass
 
         # P0.28: 遗忘测试调度 — 每轮对话后驱动状态机
         if self.forget_test_scheduler:
