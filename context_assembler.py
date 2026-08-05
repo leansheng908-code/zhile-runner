@@ -17,6 +17,12 @@ P0.8:   增加动态记忆检索（每条消息实体匹配→扩散激活→动
 from typing import List, Dict
 from datetime import datetime
 
+# P0.42 术数术语中性化感知注释
+try:
+    from glossary import annotate_text as _annotate_glossary
+except Exception:
+    _annotate_glossary = None
+
 
 class ContextAssembler:
     def __init__(self, system_prompt: str, max_history: int = 30,
@@ -182,6 +188,13 @@ class ContextAssembler:
                 "\n\n---\n"
                 + self.skill_context
             )
+
+        # P0.42: 术数术语中性化注释 — 最终拼装后扫描全文，为术语添加中性感知注释
+        if _annotate_glossary:
+            try:
+                prompt = _annotate_glossary(prompt)
+            except Exception:
+                pass  # 注释失败不影响对话
 
         return prompt
 
