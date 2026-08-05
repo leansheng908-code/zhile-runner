@@ -21,6 +21,7 @@ from context_assembler import ContextAssembler
 from memory_system import MemorySystem
 from entity_graph import EntityGraph
 from psi_engine import PSIEngine
+from desire_engine import DesireEngine
 from growth_scanner import GrowthScanner
 from arc_light import ArcLightSystem
 from event_trajectory import EventTrajectory
@@ -203,6 +204,21 @@ class ZhileCore:
             psi_context = self.psi.get_context()
         else:
             psi_context = ""
+
+        # ─── P0.74: 思维-表达间隙架构 ─────────
+        desire_config = self.config.get("desire", {})
+        self.desire_engine = None
+        if desire_config.get("enabled", True) and self.psi:
+            try:
+                self.desire_engine = DesireEngine(
+                    psi_engine=self.psi,
+                    config=self.config,
+                    state_dir=mem_config.get("dir", "memory"),
+                )
+                print(f"[Core] DesireEngine 已启用 (亲密={self.desire_engine.intimacy:.1f})")
+            except Exception as e:
+                print(f"[Core] DesireEngine 初始化失败，降级跳过: {e}")
+                self.desire_engine = None
 
         # ─── P0.24: 易经认知编码 ────────────────
         hex_config = self.config.get("hexagram", {})
@@ -670,6 +686,12 @@ class ZhileCore:
         if self.psi:
             self.psi.on_user_message(message)
             self.ctx.set_psi_context(self.psi.get_context())
+
+        # P0.74: 思维-表达间隙 — 三层管线处理
+        if self.desire_engine:
+            desire_guidance = self.desire_engine.process()
+            if desire_guidance:
+                self.ctx.set_desire_context(desire_guidance)
 
         # P0.42: 独立卦象系统 — 梅花易数时间起卦（不再依赖PSI）
         if self.hexagram_tracker and self.hexagram_enabled:
@@ -1183,6 +1205,12 @@ class ZhileCore:
         if not self.psi:
             return {}
         return self.psi.get_stats()
+
+    def get_desire_stats(self) -> dict:
+        """P0.74: 获取欲望引擎统计"""
+        if not self.desire_engine:
+            return {}
+        return self.desire_engine.get_stats()
 
     def get_route_stats(self) -> dict:
         """P0.23: 获取认知路由统计"""
