@@ -518,7 +518,6 @@ class ZhileCore:
                     )
                 # 注册 CodeProvider（复用现有 sandbox 配置）
                 sandbox_config = self.config.get("sandbox", {})
-                from code_executor import CodeExecutor
                 code_executor = CodeExecutor(config=sandbox_config) if sandbox_config.get("enabled", True) else None
                 if code_executor:
                     self.provider_runtime.register(
