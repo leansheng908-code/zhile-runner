@@ -6,6 +6,7 @@ P0.26 Phase 2: 迭代调试循环
 """
 
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Optional, List
@@ -65,6 +66,7 @@ class DebugLoop:
         self.max_iterations = config.get("max_iterations", 5)
         self.history_file = config.get("history_file",
                                        "memory/debug_history.json")
+        self.arch_map = None  # P0.26 Phase 3: 由 core.py 注入 ArchitectureMap
 
     # ─── 公开接口 ──────────────────────────────
 
@@ -194,6 +196,24 @@ class DebugLoop:
         stderr_snippet = (error.stderr[:800] if error.stderr
                           else error.error_message)
 
+        # P0.26 Phase 3: 注入架构上下文，帮助 LLM 理解模块接口
+        arch_context = ""
+        if self.arch_map:
+            try:
+                # 从代码中提取 import 的模块名作为相关模块
+                import_names = re.findall(
+                    r'^\s*from\s+([\w.]+)\s+import|^\s*import\s+([\w.]+)',
+                    code, re.MULTILINE
+                )
+                related = " ".join(m[0] or m[1] for m in import_names[:5])
+                if related:
+                    arch_context = self.arch_map.get_arch_context(
+                        related, max_tokens=600
+                    )
+                    arch_context = f"\n## 相关模块接口（修复时请遵循架构约定）\n{arch_context}\n"
+            except Exception:
+                arch_context = ""
+
         prompt = f"""你是Python代码调试专家。下面代码执行失败，请修复。
 
 ## 原始代码
@@ -213,7 +233,7 @@ class DebugLoop:
 ```
 {stdout_snippet}
 ```
-{history_text}
+{history_text}{arch_context}
 ## 要求
 1. 只输出修复后的完整代码，用```python```包裹
 2. 保持原有功能不变，只修复错误
