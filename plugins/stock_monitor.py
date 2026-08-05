@@ -375,3 +375,16 @@ class StockMonitorPlugin(BackgroundPlugin):
             return format_report()
         except Exception as e:
             return f"（股价查询失败: {e}）"
+
+    # ─── 序列化/反序列化（热重载状态保持）─────────
+
+    def serialize(self) -> dict:
+        """序列化插件状态（热重载时保持今日已告警记录）"""
+        return {
+            "_last_alert_date": dict(self._last_alert_date),
+        }
+
+    def deserialize(self, state: dict):
+        """反序列化插件状态"""
+        if state and "_last_alert_date" in state:
+            self._last_alert_date = state["_last_alert_date"]
