@@ -50,6 +50,7 @@ class TemplateFiller:
         self.enabled = self.config.get("enabled", True)
         self.templates_dir = self.config.get("templates_dir", self.TEMPLATES_DIR)
         self.plugins_dir = self.config.get("plugins_dir", "plugins")
+        self.arch_map = None  # P0.26 Phase 3: 由 core.py 注入 ArchitectureMap
 
         # 模板缓存
         self._templates: Dict[str, str] = {}
@@ -339,10 +340,24 @@ class TemplateFiller:
             for v in variables
         )
 
+        # P0.26 Phase 3: 注入架构上下文
+        arch_context = ""
+        if self.arch_map:
+            try:
+                arch_context = self.arch_map.get_arch_context(
+                    requirement, max_tokens=800
+                )
+            except Exception:
+                arch_context = ""
+
+        arch_section = ""
+        if arch_context:
+            arch_section = f"\n## 架构上下文（请遵循现有架构约定）\n{arch_context}\n"
+
         return f"""你是知乐运行器的插件生成器。根据需求填充模板变量。
 
 需求：{requirement}
-模板类型：{template_type}
+模板类型：{template_type}{arch_section}
 需要填充的变量：
 {var_list}
 
