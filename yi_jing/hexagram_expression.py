@@ -352,7 +352,7 @@ class HexagramExpressionGenerator:
         
         if bian:
             yao_info = bian.get("changed_yao", [])
-            dim = yao_info[0]["dimension"] if yao_info else "什么"
+            dim = yao_info[0].get("dimension", "什么") if yao_info else "什么"
             parts.append(
                 f"好像有什么变了——{dim}那根弦动了，"
                 f"从{bian['from_hexagram']['name']}转到了{name}。"
