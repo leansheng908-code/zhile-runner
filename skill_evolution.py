@@ -950,6 +950,10 @@ class SkillEvolution:
             if tier == "manual":
                 continue
 
+            # P0.56: 插件虚拟技能无文件，跳过
+            if tier == "plugin" or not info.get("file"):
+                continue
+
             skill_path = Path(info["file"])
             if not skill_path.exists():
                 continue
@@ -1037,6 +1041,9 @@ class SkillEvolution:
         """更新未被选中的技能的零使用轮次计数。"""
         for name, info in self.skills_registry.items():
             if info.get("tier", "auto") == "manual":
+                continue
+            # P0.56: 插件虚拟技能不参与零使用检测
+            if info.get("tier") == "plugin":
                 continue
             metadata = info.get("metadata", {})
             if name in loaded:
