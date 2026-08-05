@@ -680,6 +680,17 @@ class ZhileCore:
             except Exception:
                 pass
 
+        # P0.56: Skills×Plugin 联动 — 插件能力触发词匹配→实时数据注入
+        if self.bg_plugin_manager:
+            try:
+                plugin_data_ctx = self._check_plugin_capabilities(message)
+                if plugin_data_ctx:
+                    # 追加到已有的skill_context后面
+                    existing_skill = self.ctx.skill_context or ""
+                    self.ctx.set_skill_context(existing_skill + plugin_data_ctx)
+            except Exception:
+                pass
+
         self.ctx.add_user_message(message)
         messages = self.ctx.get_messages()
 
@@ -986,6 +997,14 @@ class ZhileCore:
             print(f"  📦 后台插件加载: {loaded} 个")
             self.bg_plugin_manager.start_all()
 
+            # P0.56: 将插件能力注册到Skills系统（/skill list 可见）
+            if self.skill_evolution:
+                try:
+                    caps = self.bg_plugin_manager.get_all_capabilities()
+                    self.skill_evolution.register_plugin_skills(caps)
+                except Exception as e:
+                    print(f"  ⚠ P0.56 插件技能注册失败: {e}")
+
     def background_status(self) -> dict:
         """P0.37: 后台任务状态"""
         status = self.background.status()
@@ -998,6 +1017,58 @@ class ZhileCore:
         self.background.stop()
         if self.bg_plugin_manager:
             self.bg_plugin_manager.stop_all()
+
+    # ─── P0.56: Skills×Plugin 联动 ──────────────────
+
+    def _check_plugin_capabilities(self, message: str) -> str:
+        """检查用户消息是否命中插件能力触发词，命中则调用插件获取数据并返回上下文文本。
+
+        这是Layer 1桥接核心：插件能力→对话可用。
+        当用户消息包含某个插件能力的触发关键词时，自动调用插件方法获取实时数据，
+        将数据作为上下文注入对话，让知乐在回复中直接使用。
+
+        Args:
+            message: 用户消息文本
+
+        Returns:
+            注入上下文文本（可能为空字符串）
+        """
+        if not self.bg_plugin_manager:
+            return ""
+
+        try:
+            caps = self.bg_plugin_manager.get_all_capabilities()
+        except Exception:
+            return ""
+
+        if not caps:
+            return ""
+
+        parts = []
+        for cap in caps:
+            triggers = cap.get("triggers", [])
+            # 检查是否命中任一触发词
+            matched = any(t in message for t in triggers if t)
+            if not matched:
+                continue
+
+            # 命中，调用插件方法获取数据
+            plugin_name = cap.get("plugin", "")
+            method_name = cap.get("method", "")
+            if not plugin_name or not method_name:
+                continue
+
+            try:
+                result = self.bg_plugin_manager.call_capability(plugin_name, method_name)
+                if result:
+                    desc = cap.get("description", cap.get("name", "插件数据"))
+                    parts.append(f"### 插件能力：{desc}\n\n{result}")
+            except Exception as e:
+                print(f"  ⚠ P0.56 插件能力调用失败 ({plugin_name}.{method_name}): {e}")
+
+        if parts:
+            return "\n\n## 插件实时数据\n\n" + "\n\n".join(parts)
+        return ""
 
     def get_status(self) -> dict:
         ctx_stats = self.ctx.get_stats()
