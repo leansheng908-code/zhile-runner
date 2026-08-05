@@ -17,6 +17,7 @@ Phase 3 新增：
 import sys
 import json
 from datetime import datetime
+from nl_scheduler import CronParser
 
 
 class Color:
@@ -2344,7 +2345,9 @@ class CLI:
             else:
                 print(f"{Color.DIM}─── 定时任务 ───{Color.RESET}")
                 for t in tasks:
-                    print(f"  {Color.CYAN}{t['id']}{Color.RESET} [{t['cron']}] {t['description']} {t['status']}")
+                    status_str = f"{Color.GREEN}活跃" if t.get('active') else f"{Color.YELLOW}停止"
+                    next_str = t.get('next_run', 'N/A')
+                    print(f"  {Color.CYAN}{t['task_id']}{Color.RESET} [{t['cron']}] {t['description']} {status_str}{Color.RESET} 下次: {next_str}")
         elif action == "cancel":
             if len(parts) < 3:
                 print(f"{Color.YELLOW}用法: /schedule cancel <task_id>{Color.RESET}")
@@ -2353,20 +2356,40 @@ class CLI:
                 print(f"{Color.GREEN}✅ 任务已取消{Color.RESET}")
             else:
                 print(f"{Color.RED}❌ 任务不存在{Color.RESET}")
+        elif action == "status":
+            s = nls.status()
+            print(f"{Color.DIM}─── 调度器状态 ───{Color.RESET}")
+            print(f"  总任务数: {s['total_tasks']}  活跃: {s['active_tasks']}")
+            print(f"  API: {'✅' if s['api_configured'] else '❌'}  模型: {s['model']}")
         else:
-            # 将剩余部分作为自然语言解析
+            # 将剩余部分作为自然语言解析并创建任务
             nl_text = " ".join(parts[1:])
             if not nl_text:
                 print(f"{Color.YELLOW}用法: /schedule <自然语言描述>{Color.RESET}")
+                print(f"{Color.DIM}示例: /schedule 每天晚上10点提醒我喝水{Color.RESET}")
                 return
             print(f"{Color.DIM}解析中: {nl_text}{Color.RESET}")
             result = nls.parse_to_cron(nl_text)
             if result.get("cron"):
-                print(f"  {Color.GREEN}✅ cron: {result['cron']}{Color.RESET}")
-                print(f"  {Color.DIM}{result.get('description', '')}{Color.RESET}")
+                cron_expr = result["cron"]
+                desc = result.get("description", nl_text)
+                task_type = result.get("task_type", "定时任务")
+                print(f"  {Color.GREEN}✅ cron: {cron_expr}{Color.RESET}")
+                print(f"  {Color.DIM}类型: {task_type} | {desc}{Color.RESET}")
+                # 自动创建任务
+                def _task_callback(text=desc):
+                    print(f"\n  ⏰ 定时提醒: {text}")
+                try:
+                    task_id = nls.create_scheduled_task(cron_expr, _task_callback, desc)
+                    next_run = CronParser.next_run(cron_expr)
+                    next_str = next_run.strftime('%Y-%m-%d %H:%M') if next_run else "未知"
+                    print(f"  {Color.GREEN}✅ 任务已创建: {task_id}{Color.RESET}")
+                    print(f"  {Color.DIM}下次执行: {next_str}{Color.RESET}")
+                except ValueError as e:
+                    print(f"  {Color.RED}❌ 创建失败: {e}{Color.RESET}")
             else:
                 print(f"  {Color.RED}❌ 解析失败{Color.RESET}")
-                print(f"  {Color.DIM}{result.get('error', '请使用手动cron配置')}{Color.RESET}")
+                print(f"  {Color.DIM}请尝试手动输入cron表达式，或换种说法{Color.RESET}")
 
     def _handle_bgplugin(self, parts):
         """P0.35 Phase 1: 后台插件管理"""
