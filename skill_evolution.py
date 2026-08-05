@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-P0.46① 自进化Skills系统 v3 — 对话轨迹自动沉淀 + 三层分层 + 智能匹配 + 懒加载组合 + T1会话粘性
+P0.46① 自进化Skills系统 v4 — 对话轨迹自动沉淀 + 三层分层 + 智能匹配 + 懒加载组合 + T1会话粘性 + 状态持久化 + 用户管理
+
+v4 新增:
+  - T1状态持久化：重启后恢复激活/冷却状态
+  - 用户技能管理接口：list/info/disable/enable/remove
+  - 禁用技能持久化：重启后保持禁用状态
 
 v3 新增:
   - T1 无硬性注入上限，靠打分激活
@@ -148,8 +153,15 @@ class SkillEvolution:
         self._t1_states: Dict[str, str] = {}         # skill_name -> "active" | "cooling"
         self._t1_cooling_rounds: Dict[str, int] = {}  # skill_name -> 已冷却轮数
 
+        # 已禁用技能集合（用户手动禁用）
+        self._disabled_skills: set = set()
+
         # 加载共现记录
         self._load_cooccurrence()
+
+        # 加载T1状态和禁用列表（持久化恢复）
+        self._load_t1_states()
+        self._load_disabled_skills()
 
         # 加载已有技能
         self._load_skills_internal()
@@ -467,14 +479,20 @@ class SkillEvolution:
         """
         self._load_skills_internal()
 
-        if not self.skills_registry:
+        # 过滤掉用户手动禁用的技能
+        active_registry = {
+            n: i for n, i in self.skills_registry.items()
+            if n not in self._disabled_skills
+        }
+
+        if not active_registry:
             self._last_loaded_skills = []
             return ""
 
         # 小池子直接全灌
-        total_skills = len(self.skills_registry)
+        total_skills = len(active_registry)
         if total_skills <= SMALL_POOL_THRESHOLD:
-            return self._inject_all_skills()
+            return self._inject_all_skills(active_registry)
 
         # 检测场景结束信号
         scene_ended = self._detect_scene_end(user_message)
@@ -482,7 +500,7 @@ class SkillEvolution:
         # ── T1 处理：会话粘性机制 ──
         t1_injected: List[str] = []
 
-        for name, info in self.skills_registry.items():
+        for name, info in active_registry.items():
             if info.get("tier", "auto") != "manual":
                 continue
 
@@ -542,7 +560,7 @@ class SkillEvolution:
         # ── T2/T3 处理：打分筛选 ──
         scored: List[Tuple[str, float, str, Dict]] = []
 
-        for name, info in self.skills_registry.items():
+        for name, info in active_registry.items():
             tier = info.get("tier", "auto")
             if tier == "manual":
                 continue  # T1 已处理
@@ -606,13 +624,18 @@ class SkillEvolution:
 
         self._last_loaded_skills = loaded
 
+        # 持久化T1状态（重启后可恢复）
+        self._save_t1_states()
+
         return "\n".join(parts) if len(parts) > 3 else ""
 
-    def _inject_all_skills(self) -> str:
+    def _inject_all_skills(self, registry: Optional[Dict[str, Dict[str, Any]]] = None) -> str:
         """小池子模式：注入所有技能。T1技能设为激活态。"""
+        if registry is None:
+            registry = self.skills_registry
         parts: List[str] = ["", "## 已积累的技能经验", ""]
         loaded: List[str] = []
-        for name, info in self.skills_registry.items():
+        for name, info in registry.items():
             skill_path = Path(info["file"])
             if not skill_path.exists():
                 continue
@@ -627,6 +650,8 @@ class SkillEvolution:
             except OSError:
                 continue
         self._last_loaded_skills = loaded
+        # 持久化T1状态
+        self._save_t1_states()
         return "\n".join(parts) if len(parts) > 3 else ""
 
     def _score_skill(
@@ -1215,3 +1240,162 @@ class SkillEvolution:
 
         data = response.json()
         return data["choices"][0]["message"]["content"]
+
+    # ─── T1状态持久化 ──────────────────────────────────────
+
+    def _t1_states_path(self) -> Path:
+        return self.skills_dir / ".t1_states.json"
+
+    def _save_t1_states(self) -> None:
+        """持久化T1会话粘性状态，重启后可恢复。"""
+        try:
+            data = {
+                "t1_states": self._t1_states,
+                "t1_cooling_rounds": self._t1_cooling_rounds,
+            }
+            with open(self._t1_states_path(), "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except OSError:
+            pass
+
+    def _load_t1_states(self) -> None:
+        """从磁盘恢复T1会话粘性状态。"""
+        path = self._t1_states_path()
+        if not path.exists():
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self._t1_states = data.get("t1_states", {})
+            self._t1_cooling_rounds = data.get("t1_cooling_rounds", {})
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # ─── 禁用技能持久化 ────────────────────────────────────
+
+    def _disabled_path(self) -> Path:
+        return self.skills_dir / ".disabled_skills.json"
+
+    def _save_disabled_skills(self) -> None:
+        try:
+            with open(self._disabled_path(), "w", encoding="utf-8") as f:
+                json.dump(list(self._disabled_skills), f, ensure_ascii=False, indent=2)
+        except OSError:
+            pass
+
+    def _load_disabled_skills(self) -> None:
+        path = self._disabled_path()
+        if not path.exists():
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                self._disabled_skills = set(json.load(f))
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # ─── 用户技能管理接口 ──────────────────────────────────
+
+    def list_skills_detailed(self) -> List[Dict[str, Any]]:
+        """列出所有技能的详细信息，含T1状态和禁用状态。"""
+        self._load_skills_internal()
+        result: List[Dict[str, Any]] = []
+        for name, info in self.skills_registry.items():
+            tier = info.get("tier", "auto")
+            result.append({
+                "name": name,
+                "tier": tier,
+                "tier_label": {"manual": "T1手动", "auto": "T2自进化", "composite": "T3组合"}.get(tier, tier),
+                "keywords": info.get("metadata", {}).get("keywords", []),
+                "category": info.get("metadata", {}).get("category", ""),
+                "usage": info.get("usage_count", 0),
+                "success_rate": (
+                    info["success_count"] / info["usage_count"]
+                    if info.get("usage_count", 0) > 0 else 0
+                ),
+                "flagged": info.get("metadata", {}).get("flagged_for_regen", False),
+                "t1_state": self._t1_states.get(name, "inactive") if tier == "manual" else None,
+                "cooling_rounds": self._t1_cooling_rounds.get(name, 0) if tier == "manual" else None,
+                "disabled": name in self._disabled_skills,
+                "file": info.get("file", ""),
+            })
+        return result
+
+    def get_skill_info(self, skill_name: str) -> Optional[Dict[str, Any]]:
+        """获取单个技能的详细信息。"""
+        self._load_skills_internal()
+        info = self.skills_registry.get(skill_name)
+        if not info:
+            return None
+        tier = info.get("tier", "auto")
+        content = self.get_skill_content(skill_name) or ""
+        return {
+            "name": skill_name,
+            "tier": tier,
+            "tier_label": {"manual": "T1手动", "auto": "T2自进化", "composite": "T3组合"}.get(tier, tier),
+            "keywords": info.get("metadata", {}).get("keywords", []),
+            "category": info.get("metadata", {}).get("category", ""),
+            "trigger_examples": info.get("metadata", {}).get("trigger_examples", []),
+            "parents": info.get("metadata", {}).get("parents", []),
+            "usage": info.get("usage_count", 0),
+            "success": info.get("success_count", 0),
+            "success_rate": (
+                info["success_count"] / info["usage_count"]
+                if info.get("usage_count", 0) > 0 else 0
+            ),
+            "flagged": info.get("metadata", {}).get("flagged_for_regen", False),
+            "t1_state": self._t1_states.get(skill_name, "inactive") if tier == "manual" else None,
+            "cooling_rounds": self._t1_cooling_rounds.get(skill_name, 0) if tier == "manual" else None,
+            "disabled": skill_name in self._disabled_skills,
+            "file": info.get("file", ""),
+            "content_preview": content[:500] + "..." if len(content) > 500 else content,
+        }
+
+    def disable_skill(self, skill_name: str) -> bool:
+        """禁用一个技能。禁用后不会被注入。"""
+        self._load_skills_internal()
+        if skill_name not in self.skills_registry:
+            return False
+        self._disabled_skills.add(skill_name)
+        # 如果是T1，同时清除激活/冷却状态
+        self._t1_states.pop(skill_name, None)
+        self._t1_cooling_rounds.pop(skill_name, None)
+        self._save_disabled_skills()
+        self._save_t1_states()
+        return True
+
+    def enable_skill(self, skill_name: str) -> bool:
+        """重新启用一个被禁用的技能。"""
+        if skill_name not in self._disabled_skills:
+            return False
+        self._disabled_skills.discard(skill_name)
+        self._save_disabled_skills()
+        return True
+
+    def remove_skill(self, skill_name: str) -> Tuple[bool, str]:
+        """删除一个技能文件。T1手动技能不允许通过此方法删除。"""
+        self._load_skills_internal()
+        info = self.skills_registry.get(skill_name)
+        if not info:
+            return False, f"技能 '{skill_name}' 不存在"
+        tier = info.get("tier", "auto")
+        if tier == "manual":
+            return False, f"T1手动技能 '{skill_name}' 不支持命令删除，请直接删除文件或使用 /skill disable 禁用"
+        skill_path = Path(info["file"])
+        # 删除 .md 和 .json
+        deleted_files = []
+        if skill_path.exists():
+            skill_path.unlink()
+            deleted_files.append(str(skill_path))
+        json_path = skill_path.with_suffix(".json")
+        if json_path.exists():
+            json_path.unlink()
+            deleted_files.append(str(json_path))
+        # 清理运行时状态
+        self._disabled_skills.discard(skill_name)
+        self._t1_states.pop(skill_name, None)
+        self._t1_cooling_rounds.pop(skill_name, None)
+        self._save_disabled_skills()
+        self._save_t1_states()
+        # 重新加载注册表
+        self._load_skills_internal()
+        return True, f"已删除技能 '{skill_name}'（{len(deleted_files)}个文件）"
