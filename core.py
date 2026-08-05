@@ -656,6 +656,15 @@ class ZhileCore:
             if plugin_ctx:
                 self.ctx.set_plugin_context(plugin_ctx)
 
+        # P0.46①: 自进化Skills — 注入已有技能到上下文
+        if self.skill_evolution:
+            try:
+                skill_ctx = self.skill_evolution.load_skills()
+                if skill_ctx:
+                    self.ctx.set_skill_context(skill_ctx)
+            except Exception:
+                pass
+
         self.ctx.add_user_message(message)
         messages = self.ctx.get_messages()
 
@@ -772,6 +781,14 @@ class ZhileCore:
                             "content": results_text
                         })
 
+                        # P0.46①: 追踪工具调用（供技能生成用）
+                        if self.skill_evolution:
+                            try:
+                                self.skill_evolution.track_tool_call(
+                                    "web_search", args, results)
+                            except Exception:
+                                pass
+
                     search_rounds += 1
                     # 最后一轮不再带tools，让模型直接回复
                     if search_rounds >= self.web_search_max_rounds:
@@ -818,6 +835,14 @@ class ZhileCore:
             self._maybe_idle_creation()
         except Exception:
             pass
+
+        # P0.46①: 评估已加载技能的使用效果
+        if self.skill_evolution:
+            try:
+                self.skill_evolution.evaluate_last_loaded(
+                    success=bool(full_response.strip()))
+            except Exception:
+                pass
 
         # P0.28: 遗忘测试调度 — 每轮对话后驱动状态机
         if self.forget_test_scheduler:
@@ -889,13 +914,29 @@ class ZhileCore:
             except Exception:
                 pass
 
-        # P0.46①: 自进化Skills — 检查是否应该生成技能
+        # P0.46①: 自进化Skills — 生成 + 迭代 + 清理
         if self.skill_evolution:
             try:
+                # 生成新技能
                 if self.skill_evolution.should_generate_skill():
                     self.skill_evolution.generate_skill(
                         conversation_context=message + " -> " + full_response
                     )
+                # 迭代：检查低效技能（每50轮一次）
+                if self._turn_count % 50 == 0:
+                    low = self.skill_evolution.get_low_performing_skills()
+                    if low:
+                        import sys as _sys
+                        for s in low:
+                            print(f"📉 [Skills] 低效技能: {s['name']} "
+                                  f"(成功率 {s['success_rate']:.0%})", file=_sys.stderr)
+                # 清理：过期低效技能（每100轮一次）
+                if self._turn_count % 100 == 0 and self._turn_count > 0:
+                    removed = self.skill_evolution.cleanup_old_skills()
+                    if removed:
+                        import sys as _sys
+                        print(f"🧹 [Skills] 清理了{removed}个过期低效技能",
+                              file=_sys.stderr)
             except Exception:
                 pass
 
