@@ -285,3 +285,72 @@ if __name__ == "__main__":
     print(f"{'=' * 52}")
     print(f"  查询完成 · {datetime.now().strftime('%H:%M:%S')}")
     print(f"{'=' * 52}")
+
+
+# ─── BackgroundPlugin 子类 ─────────────────────
+
+import sys
+import os
+
+# 确保能导入 background_plugin
+_parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _parent not in sys.path:
+    sys.path.insert(0, _parent)
+
+from background_plugin import BackgroundPlugin
+
+
+class StockMonitorPlugin(BackgroundPlugin):
+    """股票盯盘后台插件 — 周期性检查股价并推送告警"""
+
+    NAME = "stock_monitor"
+    DESCRIPTION = "股票盯盘插件（新浪财经API，目标价/成本线告警）"
+    VERSION = "1.1"
+
+    def on_start(self):
+        self._last_alert_date = {}  # {stock_code: "YYYY-MM-DD"} 避免同一天重复告警
+        print(f"  📈 股票盯盘插件启动，关注 {len(self._get_watch_list())} 只股票")
+
+    def get_interval(self) -> float:
+        return self.config.get("check_interval", 1800)  # 默认30分钟
+
+    def tick(self):
+        """每次循环：检查告警，有告警则通过输出通道推送"""
+        # 周末跳过（股市休市）
+        now = datetime.now()
+        if now.weekday() >= 5:  # 5=周六, 6=周日
+            return
+
+        # 非交易时段跳过（9:15-15:30）
+        hour_min = now.hour * 100 + now.minute
+        if hour_min < 915 or hour_min > 1530:
+            return
+
+        # 检查告警
+        try:
+            alerts = check_alerts()
+            if not alerts:
+                return
+
+            today = now.strftime("%Y-%m-%d")
+            for alert in alerts:
+                # 从告警文本提取股票代码去重
+                # 格式: "🎯 哈药股份(sh600664) ..." 或 "⚠️ 哈药股份(sh600664) ..."
+                code = ""
+                if "(" in alert and ")" in alert:
+                    code = alert[alert.index("(")+1:alert.index(")")]
+
+                if code and self._last_alert_date.get(code) == today:
+                    continue  # 今天已告警过，跳过
+
+                self.send_output(alert)
+                if code:
+                    self._last_alert_date[code] = today
+                print(f"  📈 股票告警已推送: {alert[:50]}")
+
+        except Exception as e:
+            print(f"  ⚠ stock_monitor tick 异常: {e}")
+
+    def _get_watch_list(self):
+        cfg = _load_config()
+        return cfg.get("watch_list", [])
