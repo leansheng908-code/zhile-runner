@@ -91,6 +91,9 @@ from architecture_map import ArchitectureMap
 # P0.26 Phase 4: 自主生长闭环引擎
 from growth_engine import GrowthEngine
 
+# P0.62: Skills×Plugin 联动 Layer 2 — 插件建议器
+from plugin_suggester import PluginSuggester
+
 # P0.24: 易经认知编码系统
 import sys as _sys, os as _os
 _yi_jing_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'yi_jing')
@@ -568,6 +571,15 @@ class ZhileCore:
         except Exception as e:
             print(f"⚠ [Core] GrowthEngine 初始化失败，降级跳过: {e}")
             self.growth_engine = None
+
+        # ─── P0.62: Skills×Plugin 联动 Layer 2 — 插件建议器 ────
+        self.plugin_suggester = None
+        try:
+            self.plugin_suggester = PluginSuggester(core=self)
+            print("[Core] PluginSuggester 已初始化 (技能→插件建议)")
+        except Exception as e:
+            print(f"⚠ [Core] PluginSuggester 初始化失败，降级跳过: {e}")
+            self.plugin_suggester = None
 
         # ─── UX: 消息防抖/拆分/严肃模式 ─────────
         self.serious_mode_until = 0
@@ -1055,6 +1067,13 @@ class ZhileCore:
             try:
                 self.skill_evolution.evaluate_last_loaded(
                     success=bool(full_response.strip()))
+            except Exception:
+                pass
+
+        # P0.62: Skills×Plugin 联动 — 追踪技能使用，检测插件转化候选
+        if self.plugin_suggester:
+            try:
+                self.suggest_check(user_message=message)
             except Exception:
                 pass
 
@@ -2159,6 +2178,48 @@ class ZhileCore:
         if not self.growth_engine:
             return []
         return self.growth_engine.get_history()
+
+    # ─── P0.62: Skills×Plugin 联动 — 插件建议器 ────
+
+    def suggest_check(self, user_message: str = "") -> None:
+        """在 chat() 流程中调用：追踪已加载 T2 技能的使用，检测插件转化候选。
+
+        在 skill_evolution.evaluate_last_loaded() 之后调用，
+        遍历本次加载的技能调用 plugin_suggester.track_skill_usage()。
+        """
+        if not self.plugin_suggester or not self.skill_evolution:
+            return
+        try:
+            loaded = list(self.skill_evolution._last_loaded_skills)
+            for name in loaded:
+                if name:  # 跳过空名
+                    self.plugin_suggester.track_skill_usage(name, user_message)
+        except Exception:
+            pass
+
+    def suggest_list(self) -> list:
+        """获取待处理插件建议列表"""
+        if not self.plugin_suggester:
+            return []
+        return self.plugin_suggester.get_suggestions("pending")
+
+    def suggest_accept(self, suggestion_id: str) -> dict:
+        """接受建议，启动 growth_engine 生长闭环"""
+        if not self.plugin_suggester:
+            return {"success": False, "message": "PluginSuggester 未启用"}
+        return self.plugin_suggester.accept_suggestion(suggestion_id)
+
+    def suggest_reject(self, suggestion_id: str) -> dict:
+        """拒绝建议"""
+        if not self.plugin_suggester:
+            return {"success": False, "message": "PluginSuggester 未启用"}
+        return self.plugin_suggester.reject_suggestion(suggestion_id)
+
+    def suggest_stats(self) -> dict:
+        """获取建议器统计"""
+        if not self.plugin_suggester:
+            return {"tracked_skills": 0, "total_suggestions": 0, "pending": 0}
+        return self.plugin_suggester.get_stats()
 
     # ─── P0.46④: 自动写后自检 ─────────────────
 
