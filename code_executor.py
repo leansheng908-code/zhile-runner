@@ -76,7 +76,11 @@ class CodeExecutor:
         self.timeout = config.get("timeout", 10)          # 秒
         self.memory_limit_mb = config.get("memory_limit_mb", 256)
         self.max_output = config.get("max_output", 10000)  # 字符
+        # P0.61: 输出截断阈值（字节），默认 16KB
+        self.max_output_bytes = config.get("max_output_bytes", 16384)
         self._exec_count = 0
+        # P0.61: 可选的 narration emitter，用于发送 output_truncated 事件
+        self._narration = None
 
     # ─── 公开接口 ──────────────────────────────
 
@@ -141,8 +145,13 @@ class CodeExecutor:
                 stdout, stderr = proc.communicate(
                     input=input_data, timeout=timeout
                 )
-                result.stdout = stdout[:self.max_output]
-                result.stderr = stderr[:self.max_output]
+                # P0.61: 独立截断 stdout/stderr
+                result.stdout = self._truncate_output(
+                    stdout[:self.max_output], "stdout"
+                )
+                result.stderr = self._truncate_output(
+                    stderr[:self.max_output], "stderr"
+                )
                 result.exit_code = proc.returncode
                 result.success = (proc.returncode == 0)
 
@@ -243,6 +252,47 @@ except Exception as e:
         }
 
     # ─── 内部方法 ──────────────────────────────
+
+    def _truncate_output(self, text: str, stream: str) -> str:
+        """P0.61: 截断输出到 max_output_bytes 字节
+
+        对 stdout 和 stderr 各自独立截断。截断后在末尾追加提示信息。
+        如果未超过阈值，原样返回。
+
+        Args:
+            text: 原始输出文本
+            stream: 输出流名称 (stdout/stderr)
+
+        Returns:
+            截断后的文本（可能包含截断提示）
+        """
+        original_bytes = len(text.encode("utf-8"))
+        if original_bytes <= self.max_output_bytes:
+            return text
+
+        # 截断到 max_output_bytes 字节
+        truncated_text = text.encode("utf-8")[:self.max_output_bytes].decode("utf-8", errors="ignore")
+        truncated_bytes = original_bytes - self.max_output_bytes
+
+        # 追加截断提示
+        notice = (
+            f"\n[输出被截断，原始长度: {original_bytes} 字节，"
+            f"已截断 {truncated_bytes} 字节]"
+        )
+        result = truncated_text + notice
+
+        # 发送 output_truncated narration event
+        if self._narration:
+            try:
+                self._narration.emit_output_truncated(
+                    stream=stream,
+                    original_bytes=original_bytes,
+                    truncated_bytes=truncated_bytes,
+                )
+            except Exception:
+                pass
+
+        return result
 
     def _static_check(self, code: str) -> str:
         """静态检查危险模式，返回危险描述或空字符串"""
