@@ -16,6 +16,7 @@ from typing import Generator, Optional, Tuple
 
 from dna_loader import DNALoader
 from llm_provider import LLMProvider
+from model_provider import ProviderFactory, LLMProviderAdapter
 from context_assembler import ContextAssembler
 from memory_system import MemorySystem
 from entity_graph import EntityGraph
@@ -109,7 +110,15 @@ class ZhileCore:
         dna_model = self.dna.load_model_config().get("model", {})
         llm_config = {**dna_model}
         llm_config.update(self.config.get("llm", {}))
-        self.llm = LLMProvider(llm_config)
+        # P0.46⑥: 优先使用 ProviderFactory 插件化创建，失败回退旧 LLMProvider
+        try:
+            _factory = ProviderFactory()
+            _provider = _factory.create_provider(self.config)
+            self.llm = LLMProviderAdapter(_provider)
+            print(f"[Core] LLM Provider: {type(_provider).__name__} (via ProviderFactory)")
+        except Exception as e:
+            print(f"[Core] ProviderFactory 不可用，回退 LLMProvider: {e}")
+            self.llm = LLMProvider(llm_config)
 
         # ─── 实体图 ───────────────────────────
         mem_config = self.config.get("memory", {})
