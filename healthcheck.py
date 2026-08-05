@@ -86,6 +86,8 @@ EXPECTED_FILES = {
     # P0.11 长在线思考
     "daemon_thinker.py": 5000,
     "reflection_engine.py": 3000,
+    # 插件生命周期管理
+    "plugin_installer.py": 8000,
 }
 
 # 期望的类/函数（模块名: [类名或函数名列表]）
@@ -135,6 +137,7 @@ EXPECTED_SYMBOLS = {
     "skill_evolution": ["SkillEvolution"],
     "model_provider": ["ModelProvider", "ProviderFactory", "LLMProviderAdapter"],
     "nl_scheduler": ["NaturalLanguageScheduler", "CronParser"],
+    "plugin_installer": ["PluginInstaller"],
     "post_write_lint": ["PostWriteLinter"],
     "session_checkpoint": ["SessionCheckpoint"],
     "free_will": ["FreeWillFoundation"],
