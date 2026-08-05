@@ -360,6 +360,8 @@ class CLI:
             self._handle_arch(parts)
         elif main_cmd == "/grow":
             self._handle_grow(parts)
+        elif main_cmd == "/suggest":
+            self._handle_suggest(parts)
         else:
             print(f"{Color.DIM}未知命令，输入 /help 查看可用命令{Color.RESET}")
 
@@ -3120,6 +3122,85 @@ class CLI:
                 if result.get("error"):
                     print(f"  {Color.RED}错误: {result['error']}{Color.RESET}")
 
+    def _handle_suggest(self, parts: list):
+        """处理 /suggest 命令 — 插件建议器（Skills×Plugin 联动 Layer 2）"""
+        if not self.core or not getattr(self.core, "plugin_suggester", None):
+            print(f"{Color.DIM}PluginSuggester 未启用{Color.RESET}")
+            return
+
+        sub = parts[1] if len(parts) > 1 else "list"
+
+        if sub == "list":
+            suggestions = self.core.suggest_list()
+            stats = self.core.suggest_stats()
+            print(f"{Color.DIM}─── 插件建议 ───{Color.RESET}")
+            print(f"  追踪技能: {stats.get('tracked_skills', 0)}  "
+                  f"待处理: {stats.get('pending', 0)}  "
+                  f"已接受: {stats.get('accepted', 0)}  "
+                  f"已拒绝: {stats.get('dismissed', 0)}")
+            if not suggestions:
+                print(f"  {Color.DIM}暂无待处理建议{Color.RESET}")
+                return
+            for i, s in enumerate(suggestions, 1):
+                print(f"\n  {Color.CYAN}[{s['id']}]{Color.RESET} "
+                      f"{s.get('skill_name', '?')}")
+                print(f"    触发: {s.get('usage_count', 0)}次 / "
+                      f"{s.get('span_days', 0)}天  "
+                      f"模式: {s.get('pattern', '?')}")
+                print(f"    {Color.DIM}{s.get('description', '')[:80]}{Color.RESET}")
+                print(f"    频率建议: {s.get('frequency_advice', '?')}")
+                print(f"    {Color.DIM}/suggest accept {s['id']}  |  "
+                      f"/suggest reject {s['id']}{Color.RESET}")
+
+        elif sub == "accept":
+            sid = parts[2] if len(parts) > 2 else ""
+            if not sid:
+                print(f"{Color.DIM}用法: /suggest accept <建议ID>{Color.RESET}")
+                return
+            print(f"{Color.DIM}─── 接受建议 {sid} ───{Color.RESET}")
+            suggestion = None
+            for s in self.core.suggest_list():
+                if s["id"] == sid:
+                    suggestion = s
+                    break
+            if suggestion:
+                print(f"  技能: {suggestion.get('skill_name', '?')}")
+                print(f"  能力: {suggestion.get('capability_desc', '')[:60]}")
+                print(f"  {Color.DIM}启动 growth_engine 生长闭环...{Color.RESET}")
+            result = self.core.suggest_accept(sid)
+            print()
+            if result.get("success"):
+                print(f"{Color.GREEN}✅ 建议已接受，生长闭环已启动{Color.RESET}")
+                gr = result.get("grow_result", {})
+                if gr.get("success"):
+                    print(f"  生长结果: ✅ 成功")
+                    if gr.get("installed"):
+                        print(f"  安装: ✅ 已安装")
+                else:
+                    print(f"  生长结果: ❌ 未完成")
+                    if gr.get("error"):
+                        print(f"  {Color.RED}错误: {gr['error'][:80]}{Color.RESET}")
+            else:
+                print(f"{Color.RED}❌ {result.get('message', '操作失败')}{Color.RESET}")
+
+        elif sub == "reject":
+            sid = parts[2] if len(parts) > 2 else ""
+            if not sid:
+                print(f"{Color.DIM}用法: /suggest reject <建议ID>{Color.RESET}")
+                return
+            result = self.core.suggest_reject(sid)
+            if result.get("success"):
+                print(f"{Color.DIM}建议 {sid} 已拒绝{Color.RESET}")
+            else:
+                print(f"{Color.RED}❌ {result.get('message', '操作失败')}{Color.RESET}")
+
+        else:
+            print(f"{Color.DIM}用法: /suggest list | /suggest accept <ID> | "
+                  f"/suggest reject <ID>{Color.RESET}")
+            print(f"  {Color.CYAN}/suggest list{Color.RESET}        查看待处理建议")
+            print(f"  {Color.CYAN}/suggest accept <ID>{Color.RESET} 接受建议，启动生长")
+            print(f"  {Color.CYAN}/suggest reject <ID>{Color.RESET}  拒绝建议")
+
     def _print_help(self):
         print(f"{Color.DIM}─── 命令 ───{Color.RESET}")
         print(f"  {Color.CYAN}/help{Color.RESET}              显示帮助")
@@ -3131,6 +3212,9 @@ class CLI:
         print(f"  {Color.CYAN}/grow <描述>{Color.RESET}       自主生长新能力")
         print(f"  {Color.CYAN}/grow status{Color.RESET}       生长管道状态")
         print(f"  {Color.CYAN}/grow history{Color.RESET}      生长历史记录")
+        print(f"  {Color.CYAN}/suggest list{Color.RESET}      查看插件建议")
+        print(f"  {Color.CYAN}/suggest accept <ID>{Color.RESET} 接受建议启动生长")
+        print(f"  {Color.CYAN}/suggest reject <ID>{Color.RESET}  拒绝插件建议")
         print(f"  {Color.CYAN}/psi{Color.RESET}               查看内在状态")
         print(f"  {Color.CYAN}/diary auto{Color.RESET}        自动写日记")
         print(f"  {Color.CYAN}/diary write <内容>{Color.RESET} 手动写日记")
