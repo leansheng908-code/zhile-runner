@@ -12,6 +12,11 @@ P0.60: 叙述事件协议 (Narration Events)
   - task_status: 任务状态变更
   - thinking: 思考中（桌宠歪头）
   - speaking: 说话中（桌宠嘴巴动）
+  - approval_requested: 审批请求（P0.61 新增）
+  - approval_resolved: 审批已解决（P0.61 新增）
+  - provider_retry: Provider 重试（P0.61 新增）
+  - output_truncated: 输出截断（P0.61 新增）
+  - action_blocked: 操作被拦截（P0.61 新增）
 
 设计原则：
   - 事件是纯数据dict，不携带行为
@@ -93,6 +98,131 @@ class NarrationEvent:
             "timestamp": datetime.now().isoformat(),
         }
 
+    # ─── P0.61: 新增事件类型 ─────────────────
+
+    @staticmethod
+    def approval_requested(
+        action_type: str,
+        action_desc: str,
+        risk_level: str,
+        approval_id: str,
+        timeout: int = 0,
+    ) -> dict:
+        """审批请求事件 — MEDIUM/HIGH 风险操作需要主人审批时触发
+
+        Args:
+            action_type: 操作类型（如 file_write, system_command）
+            action_desc: 操作描述
+            risk_level: 风险等级 (LOW/MEDIUM/HIGH)
+            approval_id: 审批唯一标识
+            timeout: 超时秒数（0=无超时）
+
+        Returns:
+            标准化事件dict
+        """
+        return {
+            "type": "approval_requested",
+            "timestamp": datetime.now().isoformat(),
+            "action_type": action_type,
+            "action_desc": action_desc,
+            "risk_level": risk_level,
+            "approval_id": approval_id,
+            "timeout": timeout,
+        }
+
+    @staticmethod
+    def approval_resolved(approval_id: str, result: str) -> dict:
+        """审批已解决事件 — 审批被批准/拒绝/超时时触发
+
+        Args:
+            approval_id: 审批唯一标识
+            result: 审批结果 (approved/rejected/timeout)
+
+        Returns:
+            标准化事件dict
+        """
+        return {
+            "type": "approval_resolved",
+            "timestamp": datetime.now().isoformat(),
+            "approval_id": approval_id,
+            "result": result,
+        }
+
+    @staticmethod
+    def provider_retry(
+        provider_name: str,
+        attempt: int,
+        max_retries: int,
+        next_backoff: float,
+    ) -> dict:
+        """Provider 重试事件 — Provider 执行失败后重试时触发
+
+        Args:
+            provider_name: Provider 名称
+            attempt: 当前重试次数（从1开始）
+            max_retries: 最大重试次数
+            next_backoff: 下次重试前等待秒数
+
+        Returns:
+            标准化事件dict
+        """
+        return {
+            "type": "provider_retry",
+            "timestamp": datetime.now().isoformat(),
+            "provider_name": provider_name,
+            "attempt": attempt,
+            "max_retries": max_retries,
+            "next_backoff": next_backoff,
+        }
+
+    @staticmethod
+    def output_truncated(
+        stream: str,
+        original_bytes: int,
+        truncated_bytes: int,
+    ) -> dict:
+        """输出截断事件 — 代码执行输出超过阈值被截断时触发
+
+        Args:
+            stream: 输出流名称 (stdout/stderr)
+            original_bytes: 原始字节数
+            truncated_bytes: 被截断的字节数
+
+        Returns:
+            标准化事件dict
+        """
+        return {
+            "type": "output_truncated",
+            "timestamp": datetime.now().isoformat(),
+            "stream": stream,
+            "original_bytes": original_bytes,
+            "truncated_bytes": truncated_bytes,
+        }
+
+    @staticmethod
+    def action_blocked(
+        action_type: str,
+        reason: str,
+        risk_level: str = "",
+    ) -> dict:
+        """操作被拦截事件 — 高风险操作被审批门拒绝时触发
+
+        Args:
+            action_type: 操作类型
+            reason: 拦截原因
+            risk_level: 风险等级（可选）
+
+        Returns:
+            标准化事件dict
+        """
+        return {
+            "type": "action_blocked",
+            "timestamp": datetime.now().isoformat(),
+            "action_type": action_type,
+            "reason": reason,
+            "risk_level": risk_level,
+        }
+
 
 class NarrationEmitter:
     """叙述事件发射器 — 管理回调列表，无回调时静默通过"""
@@ -145,6 +275,59 @@ class NarrationEmitter:
     def emit_speaking(self):
         """便捷：发出说话中事件"""
         self.emit(NarrationEvent.speaking())
+
+    # ─── P0.61: 新增便捷方法 ─────────────────
+
+    def emit_approval_requested(
+        self,
+        action_type: str,
+        action_desc: str,
+        risk_level: str,
+        approval_id: str,
+        timeout: int = 0,
+    ):
+        """便捷：发出审批请求事件"""
+        self.emit(NarrationEvent.approval_requested(
+            action_type, action_desc, risk_level, approval_id, timeout
+        ))
+
+    def emit_approval_resolved(self, approval_id: str, result: str):
+        """便捷：发出审批已解决事件"""
+        self.emit(NarrationEvent.approval_resolved(approval_id, result))
+
+    def emit_provider_retry(
+        self,
+        provider_name: str,
+        attempt: int,
+        max_retries: int,
+        next_backoff: float,
+    ):
+        """便捷：发出 Provider 重试事件"""
+        self.emit(NarrationEvent.provider_retry(
+            provider_name, attempt, max_retries, next_backoff
+        ))
+
+    def emit_output_truncated(
+        self,
+        stream: str,
+        original_bytes: int,
+        truncated_bytes: int,
+    ):
+        """便捷：发出输出截断事件"""
+        self.emit(NarrationEvent.output_truncated(
+            stream, original_bytes, truncated_bytes
+        ))
+
+    def emit_action_blocked(
+        self,
+        action_type: str,
+        reason: str,
+        risk_level: str = "",
+    ):
+        """便捷：发出操作被拦截事件"""
+        self.emit(NarrationEvent.action_blocked(
+            action_type, reason, risk_level
+        ))
 
 
 # ===== 独立测试模式 =====
