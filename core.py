@@ -1580,6 +1580,44 @@ class ZhileCore:
             user_profile=user_profile,
         )
 
+    # ─── 技能管理接口（P0.46① v4）─────────────
+
+    def skill_list(self) -> list:
+        """列出所有技能详情"""
+        if not self.skill_evolution:
+            return []
+        return self.skill_evolution.list_skills_detailed()
+
+    def skill_info(self, name: str) -> dict:
+        """查看单个技能详情"""
+        if not self.skill_evolution:
+            return {"error": "技能系统未启用"}
+        info = self.skill_evolution.get_skill_info(name)
+        if not info:
+            return {"error": f"技能 '{name}' 不存在"}
+        return info
+
+    def skill_disable(self, name: str) -> dict:
+        """禁用技能"""
+        if not self.skill_evolution:
+            return {"error": "技能系统未启用"}
+        ok = self.skill_evolution.disable_skill(name)
+        return {"success": ok, "message": f"已禁用 '{name}'" if ok else f"技能 '{name}' 不存在"}
+
+    def skill_enable(self, name: str) -> dict:
+        """启用技能"""
+        if not self.skill_evolution:
+            return {"error": "技能系统未启用"}
+        ok = self.skill_evolution.enable_skill(name)
+        return {"success": ok, "message": f"已启用 '{name}'" if ok else f"技能 '{name}' 未被禁用"}
+
+    def skill_remove(self, name: str) -> dict:
+        """删除T2/T3技能"""
+        if not self.skill_evolution:
+            return {"error": "技能系统未启用"}
+        ok, msg = self.skill_evolution.remove_skill(name)
+        return {"success": ok, "message": msg}
+
     # ─── 代码发布与核验（P0.27）─────────────────
 
     def publish_status(self) -> dict:
