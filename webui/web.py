@@ -11,6 +11,7 @@ from flask import Flask, request, Response, jsonify
 
 from core import ZhileCore
 from webui.web_template import PAGE_HTML
+from avatar import AvatarManager
 
 
 class WebServer:
@@ -22,6 +23,7 @@ class WebServer:
         self.host = host
         self.port = port
         self.app = Flask(__name__)
+        self.avatar = AvatarManager(core.config if core else {})
         self._setup_routes()
 
     def _setup_routes(self):
@@ -43,6 +45,7 @@ class WebServer:
                               methods=["POST"])
         self.app.add_url_rule("/api/clear", "clear", self._clear,
                               methods=["POST"])
+        self.app.add_url_rule("/api/avatar", "avatar", self._get_avatar)
 
     # ─── 页面 ─────────────────────────────────
 
@@ -236,7 +239,8 @@ class WebServer:
                     yield f"data: {json.dumps({'chunk': cmd_text}, ensure_ascii=False)}\n\n"
                     psi = self.core.get_psi_stats()
                     status = self.core.get_status()
-                    yield f"data: {json.dumps({'done': True, 'psi': psi, 'status': status}, ensure_ascii=False)}\n\n"
+                    avatar = self.avatar.get_expression(psi)
+                    yield f"data: {json.dumps({'done': True, 'psi': psi, 'status': status, 'avatar': avatar}, ensure_ascii=False)}\n\n"
                 return Response(cmd_generate(), mimetype="text/event-stream",
                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
@@ -253,7 +257,8 @@ class WebServer:
                 # 发送完成信号 + 更新后的状态
                 psi = self.core.get_psi_stats()
                 status = self.core.get_status()
-                yield f"data: {json.dumps({'done': True, 'psi': psi, 'status': status}, ensure_ascii=False)}\n\n"
+                avatar = self.avatar.get_expression(psi)
+                yield f"data: {json.dumps({'done': True, 'psi': psi, 'status': status, 'avatar': avatar}, ensure_ascii=False)}\n\n"
             except Exception as e:
                 yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
 
@@ -334,6 +339,14 @@ class WebServer:
         self.core.clear_conversation()
         return jsonify({"psi": self.core.get_psi_stats(),
                         "status": self.core.get_status()})
+
+    # ─── Avatar ───────────────────────────────
+
+    def _get_avatar(self):
+        """返回当前Avatar表情信息"""
+        psi = self.core.get_psi_stats()
+        expr = self.avatar.get_expression(psi)
+        return jsonify({**expr, "config": self.avatar.get_avatar_info()})
 
     # ─── 启动 ─────────────────────────────────
 
