@@ -85,6 +85,9 @@ from provider_runtime import (
 # P0.61: 操作审批工作流
 from approval_gate import ApprovalGate, RiskLevel
 
+# P0.26 Phase 3: 架构自认知
+from architecture_map import ArchitectureMap
+
 # P0.24: 易经认知编码系统
 import sys as _sys, os as _os
 _yi_jing_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'yi_jing')
@@ -346,6 +349,16 @@ class ZhileCore:
             llm_provider=self.llm,
             config=debug_config,
         ) if debug_config.get("enabled", True) and self.code_executor else None
+
+        # ─── P0.26 Phase 3: 架构自认知 ──────────
+        self.arch_map = ArchitectureMap(
+            root_dir=str(Path(__file__).parent),
+        )
+        # 将架构映射注入 template_filler 和 debug_loop 供后续使用
+        if self.template_filler:
+            self.template_filler.arch_map = self.arch_map
+        if self.debug_loop:
+            self.debug_loop.arch_map = self.arch_map
 
         # ─── 上下文 ───────────────────────────
         self.ctx = ContextAssembler(
@@ -2021,6 +2034,47 @@ class ZhileCore:
         if not self.template_filler:
             return {"success": False, "error": "模板填充器未启用"}
         return self.template_filler.run_pipeline(requirement, plugin_name)
+
+    # ─── P0.26 Phase 3: 架构自认知 ──────────────
+
+    def get_arch_context(self, task_desc: str = "", max_tokens: int = 2000) -> str:
+        """获取架构上下文，供 template_filler 和 debug_loop 注入 LLM。
+
+        Args:
+            task_desc: 当前任务描述（用于 suggest_insertion）
+            max_tokens: token 预算上限
+
+        Returns:
+            格式化的架构上下文字符串
+        """
+        if not self.arch_map:
+            return ""
+        try:
+            return self.arch_map.get_arch_context(task_desc, max_tokens=max_tokens)
+        except Exception:
+            return ""
+
+    def arch_show(self) -> dict:
+        """架构概览"""
+        if not self.arch_map:
+            return {"enabled": False}
+        m = self.arch_map.build_map()
+        return {
+            "enabled": True,
+            "file_count": m["file_count"],
+            "module_count": m["module_count"],
+            "extension_point_count": len(m.get("extension_points", [])),
+            "registration_point_count": len(m.get("registration_points", [])),
+            "scan_time": m.get("scan_time", ""),
+        }
+
+    def arch_refresh(self) -> dict:
+        """重建架构映射"""
+        if not self.arch_map:
+            return {"success": False, "error": "架构映射未启用"}
+        m = self.arch_map.build_map(force=True)
+        return {"success": True, "modules": m["module_count"],
+                "files": m["file_count"]}
 
     # ─── P0.26 Phase 2: 代码执行沙箱 ──────────
 
