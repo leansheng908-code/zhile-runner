@@ -56,16 +56,13 @@ WINDOW_SIZE = (960, 700)  # 桌面横屏，侧边栏+聊天区
 MIN_SIZE = (400, 600)  # 最小可缩到手机模式
 
 # ─── 启动 Web 服务器（后台线程）─────────────
-def start_web_server():
+def start_web_server(core, server):
     """在后台线程中启动 Flask 服务器"""
     try:
-        core = ZhileCore(CONFIG_FILE, no_restore=False)
-        server = WebServer(core, host=WEB_HOST, port=WEB_PORT)
         print(f"Web服务器启动: http://{WEB_HOST}:{WEB_PORT}")
         server.run()
     except Exception as e:
         print(f"Web服务器启动失败: {e}")
-        sys.exit(1)
 
 # ─── 等待服务器就绪 ──────────────────────────
 def wait_for_server(url, timeout=15):
@@ -86,8 +83,17 @@ def main():
     print("  知乐桌面应用 · P0.38 Phase 1")
     print("=" * 50)
 
+    # 初始化核心（提前到main中，便于退出时保存）
+    try:
+        core = ZhileCore(CONFIG_FILE, no_restore=False)
+        server = WebServer(core, host=WEB_HOST, port=WEB_PORT)
+    except Exception as e:
+        print(f"初始化失败: {e}")
+        input("按回车键退出...")
+        sys.exit(1)
+
     # 启动 Web 服务器线程
-    server_thread = threading.Thread(target=start_web_server, daemon=True)
+    server_thread = threading.Thread(target=start_web_server, args=(core, server), daemon=True)
     server_thread.start()
 
     # 等待服务器就绪
@@ -113,7 +119,14 @@ def main():
     # 启动 pywebview（阻塞，关闭窗口后继续）
     webview.start(debug=False)  # debug=True 可打开开发者工具
 
-    print("窗口已关闭，退出应用")
+    # 窗口已关闭 — 保存会话后退出
+    print("窗口已关闭，正在保存会话...")
+    try:
+        result = core.save()
+        memories = result.get("memories_extracted", 0) if isinstance(result, dict) else "?"
+        print(f"✓ 会话已保存（记忆{memories}条），喵～下次见啦")
+    except Exception as e:
+        print(f"保存失败: {e}")
     sys.exit(0)
 
 if __name__ == "__main__":
