@@ -586,6 +586,284 @@ def test_free_will_curiosity():
 
 
 # ═══════════════════════════════════════════════════════
+#  10b. 股票插件序列化（热重载状态保持）
+# ═══════════════════════════════════════════════════════
+
+def test_stock_monitor_serialize():
+    """serialize/deserialize 状态保持"""
+    from plugins.stock_monitor import StockMonitorPlugin, _load_config
+    from datetime import datetime
+
+    config = _load_config()
+    plugin = StockMonitorPlugin(config=config)
+    plugin.on_start()
+
+    # 模拟已告警
+    today = datetime.now().strftime("%Y-%m-%d")
+    plugin._last_alert_date = {"sh600664": today, "sh600350": today}
+
+    # 序列化
+    state = plugin.serialize()
+    assert "_last_alert_date" in state
+    assert state["_last_alert_date"]["sh600664"] == today
+
+    # 新实例反序列化
+    plugin2 = StockMonitorPlugin(config=config)
+    plugin2.on_start()
+    assert len(plugin2._last_alert_date) == 0  # 新实例为空
+
+    plugin2.deserialize(state)
+    assert plugin2._last_alert_date["sh600664"] == today
+    assert plugin2._last_alert_date["sh600350"] == today
+
+
+# ═══════════════════════════════════════════════════════
+#  11. 插件安装器
+# ═══════════════════════════════════════════════════════
+
+def test_plugin_installer_scan_clean():
+    """静态扫描：干净代码无警告"""
+    from plugin_installer import PluginInstaller
+    installer = PluginInstaller()
+    clean_code = '''
+from background_plugin import BackgroundPlugin
+
+class MyPlugin(BackgroundPlugin):
+    NAME = "my_plugin"
+    def tick(self):
+        pass
+    def get_interval(self):
+        return 60
+'''
+    warnings, has_bg = installer._scan(clean_code)
+    assert has_bg is True
+    assert len(warnings) == 0
+
+
+def test_plugin_installer_scan_dangerous():
+    """静态扫描：检测危险导入和调用"""
+    from plugin_installer import PluginInstaller
+    installer = PluginInstaller()
+    dangerous_code = '''
+import os
+import subprocess
+
+from background_plugin import BackgroundPlugin
+
+class BadPlugin(BackgroundPlugin):
+    NAME = "bad"
+    def tick(self):
+        eval("1+1")
+        exec("x=1")
+    def get_interval(self):
+        return 60
+'''
+    warnings, has_bg = installer._scan(dangerous_code)
+    assert has_bg is True
+    assert len(warnings) >= 4  # os, subprocess, eval, exec
+    warning_text = " ".join(warnings)
+    assert "os" in warning_text
+    assert "subprocess" in warning_text
+    assert "eval" in warning_text
+    assert "exec" in warning_text
+
+
+def test_plugin_installer_scan_syntax_error():
+    """静态扫描：语法错误"""
+    from plugin_installer import PluginInstaller
+    installer = PluginInstaller()
+    bad_code = "def f(:\n  pass"
+    warnings, has_bg = installer._scan(bad_code)
+    assert has_bg is False
+    assert len(warnings) >= 1
+    assert "语法错误" in warnings[0]
+
+
+def test_plugin_installer_scan_no_subclass():
+    """静态扫描：无BackgroundPlugin子类"""
+    from plugin_installer import PluginInstaller
+    installer = PluginInstaller()
+    no_subclass = "x = 1\nprint(x)"
+    warnings, has_bg = installer._scan(no_subclass)
+    assert has_bg is False
+
+
+def test_plugin_installer_manifest_rw():
+    """manifest 读写 + 同名替换"""
+    from plugin_installer import PluginInstaller
+    tmpdir = tempfile.mkdtemp()
+    try:
+        manifest_path = os.path.join(tmpdir, "manifest.json")
+        installer = PluginInstaller(plugins_dir=tmpdir, manifest_path=manifest_path)
+
+        # 写入
+        installer._register_manifest("test_plugin", "test_module", "TestPlugin")
+        data = installer._read_manifest()
+        assert len(data["plugins"]) == 1
+        assert data["plugins"][0]["name"] == "test_plugin"
+
+        # 同名替换
+        installer._register_manifest("test_plugin", "new_module", "NewPlugin")
+        data = installer._read_manifest()
+        assert len(data["plugins"]) == 1  # 不重复
+        assert data["plugins"][0]["module"] == "new_module"
+
+        # 移除
+        removed, mod = installer._unregister_manifest("test_plugin")
+        assert removed is True
+        assert mod == "new_module"
+        data = installer._read_manifest()
+        assert len(data["plugins"]) == 0
+
+        # 移除不存在的
+        removed, mod = installer._unregister_manifest("nonexistent")
+        assert removed is False
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def test_plugin_installer_download_rejects_http():
+    """下载：拒绝非HTTPS"""
+    from plugin_installer import PluginInstaller
+    installer = PluginInstaller()
+    source, filename = installer._download("http://example.com/plugin.py")
+    assert source is None
+    assert filename == ""
+
+
+def test_plugin_installer_find_plugin_class():
+    """查找BackgroundPlugin子类"""
+    from plugin_installer import PluginInstaller
+    from background_plugin import BackgroundPlugin
+    installer = PluginInstaller()
+
+    class MockModule:
+        class MyPlugin(BackgroundPlugin):
+            NAME = "my_test"
+            def tick(self): pass
+            def get_interval(self): return 60
+
+    found = installer._find_plugin_class(MockModule())
+    assert found is not None
+    assert found.NAME == "my_test"
+
+
+def test_plugin_installer_full_flow():
+    """install→reload→uninstall 完整流程（本地模拟）"""
+    from plugin_installer import PluginInstaller
+    from background_plugin import BackgroundPlugin, PluginManager
+
+    tmpdir = tempfile.mkdtemp()
+    try:
+        manifest_path = os.path.join(tmpdir, "manifest.json")
+        plugins_dir = os.path.join(tmpdir, "plugins")
+        os.makedirs(plugins_dir, exist_ok=True)
+        with open(manifest_path, "w") as f:
+            json.dump({"plugins": []}, f)
+
+        # 写一个测试插件文件
+        plugin_code = '''
+from background_plugin import BackgroundPlugin
+
+class HelloPlugin(BackgroundPlugin):
+    NAME = "hello_test"
+    VERSION = "1.0"
+    def on_start(self):
+        self._count = 0
+    def get_interval(self):
+        return 999
+    def tick(self):
+        self._count += 1
+    def serialize(self):
+        return {"count": getattr(self, "_count", 0)}
+    def deserialize(self, state):
+        if state and "count" in state:
+            self._count = state["count"]
+'''
+        plugin_file = os.path.join(plugins_dir, "hello_test.py")
+        with open(plugin_file, "w") as f:
+            f.write(plugin_code)
+
+        installer = PluginInstaller(plugins_dir=plugins_dir, manifest_path=manifest_path)
+
+        # 导入 + 查找类
+        mod = installer._import_module(plugin_file, "hello_test")
+        assert mod is not None
+        plugin_cls = installer._find_plugin_class(mod)
+        assert plugin_cls is not None
+        assert plugin_cls.NAME == "hello_test"
+
+        # 注册到manifest
+        installer._register_manifest("hello_test", "hello_test", "HelloPlugin")
+        assert len(installer._read_manifest()["plugins"]) == 1
+
+        # PluginManager 启动
+        pm = PluginManager(config={})
+        plugin = plugin_cls()
+        pm.register(plugin)
+        pm.start_all()
+        assert plugin.is_running
+
+        # 模拟运行
+        plugin._count = 5
+
+        # 序列化→停止→反序列化
+        state = plugin.serialize()
+        assert state["count"] == 5
+
+        pm.stop_all()
+        pm.unregister("hello_test")
+
+        new_plugin = plugin_cls()
+        new_plugin.deserialize(state)
+        assert new_plugin._count == 5
+
+        # 卸载
+        ok, msg = installer.uninstall("hello_test", manager=pm)
+        assert ok is True
+        assert len(installer._read_manifest()["plugins"]) == 0
+        assert not os.path.exists(plugin_file)
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+# ═══════════════════════════════════════════════════════
+#  12. 示例插件验证
+# ═══════════════════════════════════════════════════════
+
+def test_demo_timer_plugin():
+    """demo_timer 插件导入 + 序列化 + 能力暴露"""
+    from plugins.demo_timer import DemoTimerPlugin
+    from background_plugin import BackgroundPlugin
+
+    assert issubclass(DemoTimerPlugin, BackgroundPlugin)
+    assert DemoTimerPlugin.NAME == "demo_timer"
+
+    plugin = DemoTimerPlugin()
+    plugin.on_start()
+
+    # 序列化/反序列化
+    plugin._tick_count = 3
+    state = plugin.serialize()
+    assert state["tick_count"] == 3
+
+    plugin2 = DemoTimerPlugin()
+    plugin2.on_start()
+    assert plugin2._tick_count == 0
+    plugin2.deserialize(state)
+    assert plugin2._tick_count == 3
+
+    # 能力暴露
+    caps = plugin.get_capabilities()
+    assert caps["name"] == "demo_status"
+    assert caps["plugin"] == "demo_timer"
+
+    # 状态查询
+    status = plugin.get_status()
+    assert "3" in status
+
+
+# ═══════════════════════════════════════════════════════
 #  运行入口
 # ═══════════════════════════════════════════════════════
 
