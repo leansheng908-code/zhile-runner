@@ -96,6 +96,7 @@ class BackgroundPlugin(ABC):
         # 熔断器退避时间表：第1次→立即重试，第2次→30s，第3次→60s，第4+次→300s
         self._BACKOFF_TIMES = [0, 0, 30, 60, 300]
         self._CRASH_DISABLE_THRESHOLD = 5  # 连续崩溃5次后禁用
+        self.enabled = True  # 兼容 PluginManager 访问 .enabled
 
     def set_output_callback(self, callback: Callable[[str], None]):
         """设置输出通道回调，插件可通过 send_output() 发送消息"""
