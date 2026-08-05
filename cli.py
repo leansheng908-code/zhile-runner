@@ -2392,7 +2392,7 @@ class CLI:
                 print(f"  {Color.DIM}请尝试手动输入cron表达式，或换种说法{Color.RESET}")
 
     def _handle_bgplugin(self, parts):
-        """P0.35 Phase 1: 后台插件管理"""
+        """P0.35 Phase 1 + 插件生命周期管理"""
         if not self.core or not self.core.bg_plugin_manager:
             print(f"{Color.DIM}后台插件管理器未启用{Color.RESET}")
             return
@@ -2404,21 +2404,108 @@ class CLI:
             print(f"  启用: {status.get('plugins_enabled', False)}  总数: {status.get('total', 0)}  运行中: {status.get('running', 0)}  已停止: {status.get('stopped', 0)}")
             for p in status.get("plugins", []):
                 running = p.get("is_running", False)
-                s = f"{Color.GREEN}运行中" if running else f"{Color.DIM}已停止"
+                circuit = p.get("circuit_disabled", False)
+                if circuit:
+                    s = f"{Color.RED}熔断"
+                elif running:
+                    s = f"{Color.GREEN}运行中"
+                else:
+                    s = f"{Color.DIM}已停止"
                 interval = p.get("interval")
                 interval_str = f"{interval}s" if interval else "N/A"
                 ticks = p.get("tick_count", 0)
-                errors = p.get("error_count", 0)
+                crashes = p.get("crash_count", 0)
                 last = p.get("last_tick", "N/A")
-                print(f"  {Color.CYAN}{p['name']}{Color.RESET} {s}{Color.RESET} 间隔:{interval_str}  ticks:{ticks}  错误:{errors}  最后:{last}")
+                crash_str = f"  崩溃:{Color.RED}{crashes}{Color.RESET}" if crashes else ""
+                print(f"  {Color.CYAN}{p['name']}{Color.RESET} {s}{Color.RESET} 间隔:{interval_str}  ticks:{ticks}{crash_str}  最后:{last}")
         elif action == "start":
             mgr.start_all()
             print(f"{Color.GREEN}✅ 所有插件已启动{Color.RESET}")
         elif action == "stop":
             mgr.stop_all()
             print(f"{Color.YELLOW}⏹ 所有插件已停止{Color.RESET}")
+        elif action == "install" and len(parts) > 2:
+            url = parts[2]
+            print(f"{Color.CYAN}📥 正在安装插件: {url}{Color.RESET}")
+            try:
+                from plugin_installer import PluginInstaller
+                installer = PluginInstaller(
+                    plugins_dir=mgr._plugins_dir,
+                    manifest_path=os.path.join(mgr._plugins_dir, "manifest.json")
+                )
+                ok, msg, warnings = installer.install(url, manager=mgr)
+                if ok:
+                    print(f"{Color.GREEN}✅ {msg}{Color.RESET}")
+                    if warnings:
+                        print(f"{Color.YELLOW}  ⚠ 安全警告:{Color.RESET}")
+                        for w in warnings:
+                            print(f"  {Color.YELLOW}{w}{Color.RESET}")
+                else:
+                    print(f"{Color.RED}❌ {msg}{Color.RESET}")
+            except Exception as e:
+                print(f"{Color.RED}❌ 安装异常: {e}{Color.RESET}")
+        elif action == "uninstall" and len(parts) > 2:
+            name = parts[2]
+            print(f"{Color.CYAN}🗑 正在卸载插件: {name}{Color.RESET}")
+            try:
+                from plugin_installer import PluginInstaller
+                installer = PluginInstaller(
+                    plugins_dir=mgr._plugins_dir,
+                    manifest_path=os.path.join(mgr._plugins_dir, "manifest.json")
+                )
+                ok, msg = installer.uninstall(name, manager=mgr)
+                if ok:
+                    print(f"{Color.GREEN}✅ {msg}{Color.RESET}")
+                else:
+                    print(f"{Color.RED}❌ {msg}{Color.RESET}")
+            except Exception as e:
+                print(f"{Color.RED}❌ 卸载异常: {e}{Color.RESET}")
+        elif action == "reload" and len(parts) > 2:
+            name = parts[2]
+            print(f"{Color.CYAN}🔄 正在热重载插件: {name}{Color.RESET}")
+            try:
+                from plugin_installer import PluginInstaller
+                installer = PluginInstaller(
+                    plugins_dir=mgr._plugins_dir,
+                    manifest_path=os.path.join(mgr._plugins_dir, "manifest.json")
+                )
+                ok, msg = installer.reload(name, manager=mgr)
+                if ok:
+                    print(f"{Color.GREEN}✅ {msg}{Color.RESET}")
+                else:
+                    print(f"{Color.RED}❌ {msg}{Color.RESET}")
+            except Exception as e:
+                print(f"{Color.RED}❌ 重载异常: {e}{Color.RESET}")
+        elif action == "preview" and len(parts) > 2:
+            url = parts[2]
+            print(f"{Color.CYAN}👁 预览插件源码: {url}{Color.RESET}")
+            try:
+                from plugin_installer import PluginInstaller
+                installer = PluginInstaller(
+                    plugins_dir=mgr._plugins_dir,
+                    manifest_path=os.path.join(mgr._plugins_dir, "manifest.json")
+                )
+                ok, preview, warnings = installer.preview_source(url)
+                if ok:
+                    print(f"{Color.DIM}─── 源码预览 ───{Color.RESET}")
+                    print(preview)
+                    if warnings:
+                        print(f"\n{Color.YELLOW}⚠ 安全警告 ({len(warnings)}条):{Color.RESET}")
+                        for w in warnings:
+                            print(f"  {Color.YELLOW}{w}{Color.RESET}")
+                    print(f"\n{Color.DIM}确认安装: /bgplugin install {url}{Color.RESET}")
+                else:
+                    print(f"{Color.RED}❌ {preview}{Color.RESET}")
+            except Exception as e:
+                print(f"{Color.RED}❌ 预览异常: {e}{Color.RESET}")
         else:
-            print(f"{Color.DIM}用法: /bgplugin [status|start|stop]{Color.RESET}")
+            print(f"{Color.DIM}用法:{Color.RESET}")
+            print(f"  {Color.CYAN}/bgplugin status{Color.RESET}          查看插件状态")
+            print(f"  {Color.CYAN}/bgplugin start|stop{Color.RESET}     启动/停止所有插件")
+            print(f"  {Color.CYAN}/bgplugin install <url>{Color.RESET}  从URL安装插件")
+            print(f"  {Color.CYAN}/bgplugin preview <url>{Color.RESET}  预览插件源码")
+            print(f"  {Color.CYAN}/bgplugin uninstall <name>{Color.RESET} 卸载插件")
+            print(f"  {Color.CYAN}/bgplugin reload <name>{Color.RESET}  热重载插件")
 
     # ─── 隐藏系统诊断 ──────────────────────
 
@@ -2785,7 +2872,8 @@ class CLI:
         print(f"  {Color.CYAN}/schedule <描述>{Color.RESET}    自然语言创建定时任务")
         print(f"  {Color.CYAN}/schedule list{Color.RESET}     列出定时任务")
         print(f"  {Color.CYAN}/bgplugin status{Color.RESET}   后台插件状态")
-        print(f"  {Color.CYAN}/bgplugin start{Color.RESET}    启动所有插件")
+        print(f"  {Color.CYAN}/bgplugin install{Color.RESET}  从URL安装插件")
+        print(f"  {Color.CYAN}/bgplugin reload{Color.RESET}   热重载插件")
         print(f"  {Color.CYAN}/diag{Color.RESET}              隐藏系统深度诊断")
         print(f"  {Color.CYAN}/exit{Color.RESET}              退出（自动保存）")
 
