@@ -770,6 +770,85 @@ class ClaudeProvider(ModelProvider):
 
 # ─── Provider 工厂 ──────────────────────────────────────
 
+# ─── P0.61: 多模态 Provider 抽象基类 ───────────────────
+
+class VisionProvider(ABC):
+    """视觉 Provider 抽象基类（P0.61 预留接口）
+
+    为 P0.58 五感+身体 和 P0.59 电脑控制预留的视觉能力接口。
+    具体实现将在后续阶段添加。
+
+    子类需要实现 vision_describe() 方法，接受图片路径或URL，
+    返回对图片内容的文字描述。
+    """
+
+    @abstractmethod
+    def vision_describe(
+        self,
+        image_path_or_url: str,
+        prompt: str = "",
+    ) -> str:
+        """描述图片内容
+
+        Args:
+            image_path_or_url: 图片本地路径或URL
+            prompt: 描述提示词（可选，如"这张图片中有哪些物体？"）
+
+        Returns:
+            图片内容的文字描述
+
+        Raises:
+            NotImplementedError: 尚未实现具体逻辑
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} 尚未实现 vision_describe"
+        )
+
+
+class AudioProvider(ABC):
+    """音频 Provider 抽象基类（P0.61 预留接口）
+
+    为 P0.58 五感+身体 和 P0.59 电脑控制预留的音频能力接口。
+    支持文本转语音（TTS）和语音转文本（STT）。
+    具体实现将在后续阶段添加。
+    """
+
+    @abstractmethod
+    def tts(self, text: str, voice_id: str = "default") -> bytes:
+        """文本转语音
+
+        Args:
+            text: 要转换为语音的文本
+            voice_id: 语音ID（可选，默认"default"）
+
+        Returns:
+            语音音频数据（bytes）
+
+        Raises:
+            NotImplementedError: 尚未实现具体逻辑
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} 尚未实现 tts"
+        )
+
+    @abstractmethod
+    def stt(self, audio_path: str) -> str:
+        """语音转文本
+
+        Args:
+            audio_path: 音频文件路径
+
+        Returns:
+            识别出的文本
+
+        Raises:
+            NotImplementedError: 尚未实现具体逻辑
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} 尚未实现 stt"
+        )
+
+
 class ProviderFactory:
     """模型 Provider 工厂。
 
@@ -796,6 +875,9 @@ class ProviderFactory:
         """初始化工厂，注册内置 Provider。"""
         # 每个实例有独立的注册表副本
         self._providers: Dict[str, type] = dict(self._BUILTIN_PROVIDERS)
+        # P0.61: 注册多模态基类名（无具体实现，仅占位）
+        self._providers["vision"] = VisionProvider
+        self._providers["audio"] = AudioProvider
 
     def register_provider(
         self, name: str, provider_class: type
