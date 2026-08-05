@@ -347,6 +347,10 @@ class CLI:
             self._handle_diag(parts)
         elif main_cmd == "/work":
             self._handle_work(parts)
+        elif main_cmd == "/approve":
+            self._handle_approve(parts)
+        elif main_cmd == "/pending":
+            self._handle_pending(parts)
         elif main_cmd == "/help":
             self._print_help()
         elif main_cmd == "/test":
@@ -2578,6 +2582,91 @@ class CLI:
                       f"({w.get('status', '')})")
             print(f"{Color.DIM}共 {len(pending)} 个任务{Color.RESET}")
 
+    # ─── P0.61: 审批命令 ──────────────────────
+
+    def _handle_approve(self, parts: list):
+        """审批命令：/approve <approval_id> <yes|no>"""
+        if not self.core or not self.core.approval_gate:
+            print(f"{Color.DIM}ApprovalGate 未初始化{Color.RESET}")
+            return
+
+        if len(parts) < 3:
+            print(f"{Color.DIM}用法: /approve <approval_id> <yes|no>{Color.RESET}")
+            return
+
+        approval_id = parts[1]
+        decision = parts[2].lower().strip()
+
+        if decision in ("yes", "y", "approve", "批准"):
+            approved = True
+        elif decision in ("no", "n", "reject", "拒绝"):
+            approved = False
+        else:
+            print(f"{Color.RED}无效的决策: {decision}（请用 yes 或 no）{Color.RESET}")
+            return
+
+        # 尝试匹配完整 ID 或前缀
+        full_id = self._resolve_approval_id(approval_id)
+        if not full_id:
+            print(f"{Color.RED}未找到审批: {approval_id}{Color.RESET}")
+            return
+
+        ok = self.core.approve_action(full_id, approved)
+        if ok:
+            action = "批准" if approved else "拒绝"
+            print(f"{Color.GREEN}✦ 审批已{action}: {full_id[:8]}...{Color.RESET}")
+        else:
+            print(f"{Color.RED}审批失败（可能已被解决或不存在）{Color.RESET}")
+
+    def _handle_pending(self, parts: list):
+        """待审批列表命令：/pending"""
+        if not self.core or not self.core.approval_gate:
+            print(f"{Color.DIM}ApprovalGate 未初始化{Color.RESET}")
+            return
+
+        pending = self.core.pending_approvals()
+        if not pending:
+            print(f"{Color.DIM}暂无待审批操作{Color.RESET}")
+            return
+
+        print(f"{Color.DIM}─── 待审批操作 ───{Color.RESET}")
+        for item in pending:
+            aid_short = item.get("approval_id", "")[:8]
+            action_type = item.get("action_type", "")
+            action_desc = item.get("action_desc", "")[:40]
+            risk = item.get("risk_level", "")
+
+            risk_color = Color.RED if risk == "HIGH" else Color.YELLOW
+            print(f"  {risk_color}{aid_short}{Color.RESET} "
+                  f"[{risk}] {action_type}: {action_desc}")
+        print(f"{Color.DIM}共 {len(pending)} 个待审批{Color.RESET}")
+
+    def _resolve_approval_id(self, short_id: str) -> str:
+        """通过前缀匹配完整审批ID
+
+        Args:
+            short_id: 审批ID前缀
+
+        Returns:
+            完整审批ID，未找到返回空字符串
+        """
+        if not self.core or not self.core.approval_gate:
+            return ""
+
+        # 先尝试完整匹配
+        entry = self.core.approval_gate.get_entry(short_id)
+        if entry:
+            return short_id
+
+        # 前缀匹配
+        if len(short_id) >= 4:
+            for item in self.core.approval_gate.pending_approvals():
+                full_id = item.get("approval_id", "")
+                if full_id.startswith(short_id):
+                    return full_id
+
+        return ""
+
     # ─── 隐藏系统诊断 ──────────────────────
 
     def _handle_diag(self, parts: list):
@@ -2950,6 +3039,8 @@ class CLI:
         print(f"  {Color.CYAN}/work history{Color.RESET}      任务历史")
         print(f"  {Color.CYAN}/work status <id>{Color.RESET}  查看任务详情")
         print(f"  {Color.CYAN}/work retry <id>{Color.RESET}   重试失败任务")
+        print(f"  {Color.CYAN}/approve <id> <yes|no>{Color.RESET} 手动审批操作")
+        print(f"  {Color.CYAN}/pending{Color.RESET}            查看待审批列表")
         print(f"  {Color.CYAN}/exit{Color.RESET}              退出（自动保存）")
 
     def _print_welcome(self):
