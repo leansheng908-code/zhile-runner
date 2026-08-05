@@ -358,6 +358,8 @@ class CLI:
             self._test_connection(silent=False)
         elif main_cmd == "/arch":
             self._handle_arch(parts)
+        elif main_cmd == "/grow":
+            self._handle_grow(parts)
         else:
             print(f"{Color.DIM}未知命令，输入 /help 查看可用命令{Color.RESET}")
 
@@ -3044,6 +3046,80 @@ class CLI:
             print(f"  {Color.DIM}/arch show | /arch module <name> | /arch extend | "
                   f"/arch suggest <描述> | /arch refresh | /arch deps{Color.RESET}")
 
+    # ─── P0.26 Phase 4: 自主生长闭环 ──────────────
+
+    def _handle_grow(self, parts: list):
+        """处理 /grow 命令 — 自主生长闭环"""
+        if not self.core or not getattr(self.core, "growth_engine", None):
+            print(f"{Color.DIM}GrowthEngine 未启用{Color.RESET}")
+            return
+
+        sub = parts[1] if len(parts) > 1 else "status"
+
+        if sub == "status":
+            status = self.core.grow_status()
+            if not status.get("enabled", True) and status.get("enabled") is False:
+                print(f"{Color.DIM}GrowthEngine 未启用{Color.RESET}")
+                return
+            print(f"{Color.DIM}─── 生长管道状态 ───{Color.RESET}")
+            print(f"  状态: {Color.CYAN}{status.get('status', 'unknown')}{Color.RESET}")
+            if status.get("current_capability"):
+                print(f"  当前能力: {status['current_capability']}")
+            if status.get("error"):
+                print(f"  错误: {Color.RED}{status['error']}{Color.RESET}")
+
+        elif sub == "history":
+            history = self.core.grow_history()
+            if not history:
+                print(f"{Color.DIM}暂无生长记录{Color.RESET}")
+                return
+            print(f"{Color.DIM}─── 生长历史 ({len(history)} 条) ───{Color.RESET}")
+            for i, rec in enumerate(reversed(history[-10:]), 1):
+                status_color = Color.GREEN if rec.get("status") == "success" else Color.RED
+                print(f"  {i}. [{status_color}{rec.get('status', '?')}{Color.RESET}] "
+                      f"{rec.get('capability', '?')[:50]}")
+                print(f"     {Color.DIM}{rec.get('timestamp', '?')[:19]}  "
+                      f"类型={rec.get('plugin_type', '?')}  "
+                      f"模块={rec.get('module_name', '?')}{Color.RESET}")
+                if rec.get("error"):
+                    print(f"     {Color.RED}错误: {rec['error'][:60]}{Color.RESET}")
+
+        else:
+            # 将 sub 和后续部分拼成能力描述
+            desc = " ".join(parts[1:]).strip()
+            if not desc:
+                print(f"{Color.DIM}用法: /grow <能力描述>  |  /grow status  |  /grow history{Color.RESET}")
+                print(f"  {Color.CYAN}/grow 我需要查股票实时价格的能力{Color.RESET}")
+                return
+            print(f"{Color.DIM}─── 启动自主生长 ───{Color.RESET}")
+            print(f"  需求: {Color.CYAN}{desc}{Color.RESET}")
+            print(f"  {Color.DIM}分析→生成→测试→审核→安装→验证 ...{Color.RESET}")
+            result = self.core.grow_capability(desc)
+            print()
+            if result.get("success"):
+                print(f"{Color.GREEN}✅ 生长完成！{Color.RESET}")
+                if result.get("analysis"):
+                    a = result["analysis"]
+                    print(f"  插件类型: {a.get('plugin_type', '?')}")
+                    print(f"  模块名: {a.get('module_name', '?')}")
+                    print(f"  基类: {a.get('base_class', '?')}")
+                if result.get("test_result"):
+                    print(f"  测试: {result['test_result'].get('summary', '?')}")
+                print(f"  审核: {result.get('approval_status', '?')}")
+                print(f"  安装: {'✅' if result.get('installed') else '❌'}")
+            else:
+                print(f"{Color.RED}❌ 生长失败{Color.RESET}")
+                if result.get("analysis"):
+                    a = result["analysis"]
+                    print(f"  插件类型: {a.get('plugin_type', '?')}")
+                    print(f"  模块名: {a.get('module_name', '?')}")
+                if result.get("test_result"):
+                    print(f"  测试: {result['test_result'].get('summary', '?')}")
+                if result.get("approval_status"):
+                    print(f"  审核: {result.get('approval_status', '?')}")
+                if result.get("error"):
+                    print(f"  {Color.RED}错误: {result['error']}{Color.RESET}")
+
     def _print_help(self):
         print(f"{Color.DIM}─── 命令 ───{Color.RESET}")
         print(f"  {Color.CYAN}/help{Color.RESET}              显示帮助")
@@ -3052,6 +3128,9 @@ class CLI:
         print(f"  {Color.CYAN}/arch extend{Color.RESET}       查看扩展点")
         print(f"  {Color.CYAN}/arch suggest{Color.RESET}      建议插入点")
         print(f"  {Color.CYAN}/arch deps{Color.RESET}         模块依赖图")
+        print(f"  {Color.CYAN}/grow <描述>{Color.RESET}       自主生长新能力")
+        print(f"  {Color.CYAN}/grow status{Color.RESET}       生长管道状态")
+        print(f"  {Color.CYAN}/grow history{Color.RESET}      生长历史记录")
         print(f"  {Color.CYAN}/psi{Color.RESET}               查看内在状态")
         print(f"  {Color.CYAN}/diary auto{Color.RESET}        自动写日记")
         print(f"  {Color.CYAN}/diary write <内容>{Color.RESET} 手动写日记")
