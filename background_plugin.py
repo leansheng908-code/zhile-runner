@@ -86,6 +86,21 @@ class BackgroundPlugin(ABC):
         self._max_errors = 10  # 连续出错上限
         self._last_tick_time: Optional[datetime] = None
         self._tick_count = 0
+        self._output_callback: Optional[Callable[[str], None]] = None
+
+    def set_output_callback(self, callback: Callable[[str], None]):
+        """设置输出通道回调，插件可通过 send_output() 发送消息"""
+        self._output_callback = callback
+
+    def send_output(self, message: str) -> bool:
+        """通过输出通道发送消息，返回是否成功"""
+        if self._output_callback:
+            try:
+                self._output_callback(message)
+                return True
+            except Exception as e:
+                print(f"  ⚠ 插件 {self.name} 输出失败: {e}")
+        return False
 
     @property
     def name(self) -> str:
@@ -230,12 +245,19 @@ class PluginManager:
         self.config = config or {}
         self._plugins: Dict[str, BackgroundPlugin] = {}
         self._lock = threading.Lock()
+        self._output_callback: Optional[Callable[[str], None]] = None
 
-        # 从config.json读取配置
-        plugins_cfg = self.config.get("plugins", {})
-        self._plugins_enabled = plugins_cfg.get("enabled", True)
-        self._plugins_dir = plugins_cfg.get("dir", "plugins")
-        self._active_list = plugins_cfg.get("active", [])
+        # 配置直接从 config 字典读取
+        self._plugins_enabled = self.config.get("enabled", True)
+        self._plugins_dir = self.config.get("dir", "plugins")
+        self._active_list = self.config.get("active", [])
+
+    def set_output_callback(self, callback: Callable[[str], None]):
+        """设置全局输出回调，会同步到所有已注册和后续注册的插件"""
+        self._output_callback = callback
+        with self._lock:
+            for plugin in self._plugins.values():
+                plugin.set_output_callback(callback)
 
     # ─── 注册/注销 ───────────────────────────────
 
@@ -258,6 +280,9 @@ class PluginManager:
             if name in self._plugins:
                 print(f"  ⚠ 插件 '{name}' 已注册，跳过重复注册")
                 return False
+            # 同步输出回调到新插件
+            if self._output_callback:
+                plugin.set_output_callback(self._output_callback)
             self._plugins[name] = plugin
 
         print(f"  📌 插件 '{name}' 已注册")
@@ -379,7 +404,7 @@ class PluginManager:
 
     def load_from_config(self, config_path: str = "config.json") -> int:
         """
-        从config.json的plugins段读取启用列表，并尝试加载插件
+        从config.json的background_plugins段读取启用列表，并尝试加载插件
 
         Args:
             config_path: config.json路径
@@ -394,15 +419,16 @@ class PluginManager:
             print(f"  ⚠ 无法读取配置文件 {config_path}: {e}")
             return 0
 
-        plugins_cfg = cfg.get("plugins", {})
-        if not plugins_cfg.get("enabled", True):
-            print("  ℹ 配置中插件系统未启用")
+        # 读取 background_plugins 段
+        bgp_cfg = cfg.get("background_plugins", {})
+        if not bgp_cfg.get("enabled", True):
+            print("  ℹ 配置中后台插件系统未启用")
             return 0
 
         # 更新配置
         self._plugins_enabled = True
-        self._plugins_dir = plugins_cfg.get("dir", "plugins")
-        self._active_list = plugins_cfg.get("active", [])
+        self._plugins_dir = bgp_cfg.get("dir", "plugins")
+        self._active_list = bgp_cfg.get("active", [])
 
         # 如果配置中有manifest，尝试从plugins目录加载
         loaded = 0
