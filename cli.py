@@ -4,6 +4,7 @@
 Phase 3 新增：
   - 每轮对话后更新PSI状态
   - /psi 查看内在状态
+  - /desire 查看欲望引擎状态
   - /diary 写知觉日记
   - /growth 扫描自成长候选
   - 退出时保存PSI状态
@@ -11,7 +12,7 @@ Phase 3 新增：
 特性：
   - 流式输出（逐字打印）
   - ANSI彩色输出
-  - /help /status /memory /psi /diary /growth /clear /forget /save /test /exit
+  - /help /status /memory /psi /desire /diary /growth /clear /forget /save /test /exit
 """
 
 import sys
@@ -278,6 +279,8 @@ class CLI:
             self._handle_memory(parts)
         elif main_cmd == "/psi":
             self._print_psi()
+        elif main_cmd == "/desire":
+            self._print_desire()
         elif main_cmd == "/diary":
             self._handle_diary(parts)
         elif main_cmd == "/growth":
@@ -387,6 +390,33 @@ class CLI:
         print(f"  {Color.DIM}意识帧: {stats['consciousness_frame']}{Color.RESET}")
         if stats.get("last_interaction"):
             print(f"  {Color.DIM}上次互动: {stats['last_interaction'][:19]}{Color.RESET}")
+
+    # ─── 欲望引擎命令 (P0.74) ─────────────────
+
+    def _print_desire(self):
+        """显示思维-表达间隙状态"""
+        desire_engine = getattr(self.core, 'desire_engine', None) if self.core else None
+        if not desire_engine:
+            print(f"{Color.DIM}欲望引擎未启用{Color.RESET}")
+            return
+
+        text = desire_engine.get_diagnostic_text()
+        # 按行着色输出
+        for line in text.split("\n"):
+            if line.startswith("───"):
+                print(f"{Color.PINK}{line}{Color.RESET}")
+            elif line.startswith("  ▸"):
+                print(f"{Color.CYAN}{line}{Color.RESET}")
+            elif "泄漏" in line:
+                print(f"{Color.BLUE}{line}{Color.RESET}")
+            elif "半遮" in line:
+                print(f"{Color.YELLOW}{line}{Color.RESET}")
+            elif "回避" in line:
+                print(f"{Color.PINK}{line}{Color.RESET}")
+            elif "坦白" in line:
+                print(f"{Color.GREEN}{line}{Color.RESET}")
+            else:
+                print(f"{Color.DIM}{line}{Color.RESET}")
 
     # ─── 知觉日记 ─────────────────────────────
 
@@ -661,6 +691,7 @@ class CLI:
         print(f"  预估token: ~{stats['estimated_tokens']}")
         print(f"  记忆注入: {'✓' if stats['has_memory'] else '✗'}")
         print(f"  PSI注入:  {'✓' if stats['has_psi'] else '✗'}")
+        print(f"  欲望注入: {'✓' if stats.get('has_desire') else '✗'}")
         if self.memory:
             mem_stats = self.memory.get_stats()
             print(f"  记忆:     {mem_stats['active']}活跃/{mem_stats['total']}总计")
@@ -3216,6 +3247,7 @@ class CLI:
         print(f"  {Color.CYAN}/suggest accept <ID>{Color.RESET} 接受建议启动生长")
         print(f"  {Color.CYAN}/suggest reject <ID>{Color.RESET}  拒绝插件建议")
         print(f"  {Color.CYAN}/psi{Color.RESET}               查看内在状态")
+        print(f"  {Color.CYAN}/desire{Color.RESET}            查看欲望引擎状态")
         print(f"  {Color.CYAN}/diary auto{Color.RESET}        自动写日记")
         print(f"  {Color.CYAN}/diary write <内容>{Color.RESET} 手动写日记")
         print(f"  {Color.CYAN}/diary read{Color.RESET}        查看日记")
