@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 """
-P0.46① 自进化Skills系统 v2 — 对话轨迹自动沉淀 + 三层分层 + 智能匹配 + 懒加载组合
+P0.46① 自进化Skills系统 v3 — 对话轨迹自动沉淀 + 三层分层 + 智能匹配 + 懒加载组合 + T1会话粘性
 
-v2 新增:
+v3 新增:
+  - T1 无硬性注入上限，靠打分激活
+  - T1 会话粘性: 激活态→场景结束→冷却态→下线 三阶段生命周期
+  - T1 不参与自动组合，仅T2可组合
+  - T2+T3 合计上限独立于T1
+
+v2:
   - 三层技能架构: manual(手动T1) / auto(自进化T2) / composite(组合T3)
   - 多信号打分筛选: 关键词×3 + 触发示例×2 + 类别×1 + 频率×0.5
   - 懒加载组合: 同组技能共现3次自动触发组合
@@ -56,11 +62,19 @@ WEIGHT_FREQUENCY = 0.5     # 使用频率加成
 WEIGHT_NOVELTY = 2.0       # 新手加成
 
 SCORE_THRESHOLD = 3.0      # 注入阈值
-MAX_INJECT_T1 = 2          # T1每轮最多注入
+# T1 无硬性注入上限，靠打分+会话粘性管理
 MAX_INJECT_T2 = 3          # T2每轮最多注入
 MAX_INJECT_T3 = 1          # T3每轮最多注入
-MAX_INJECT_TOTAL = 5       # 总上限
+MAX_INJECT_T2T3 = 4        # T2+T3 合计上限
 SMALL_POOL_THRESHOLD = 3   # 技能总数≤此值时全灌
+
+# ── T1 会话粘性 ──
+COOLING_ROUNDS = 10        # T1 冷却期轮数
+SCENE_END_SIGNALS = [
+    "不玩了", "结束", "好了", "换个话题", "算了", "就这样吧",
+    "不聊了", "换一个", "退出", "完事了", "到此为止", "不打了",
+    "下线了", "去忙了", "先这样", "结束吧", "不搞了",
+]
 
 # ── 懒加载组合 ──
 COMPOSE_THRESHOLD = 3      # 共现次数达到此值触发组合
@@ -129,6 +143,10 @@ class SkillEvolution:
         self._last_loaded_skills: List[str] = []
         self.cooccurrence: Dict[str, int] = {}
         self._round_count: int = 0  # 总轮次计数（用于零使用检测）
+
+        # T1 会话粘性状态
+        self._t1_states: Dict[str, str] = {}         # skill_name -> "active" | "cooling"
+        self._t1_cooling_rounds: Dict[str, int] = {}  # skill_name -> 已冷却轮数
 
         # 加载共现记录
         self._load_cooccurrence()
@@ -403,10 +421,43 @@ class SkillEvolution:
 
     # ─── 技能加载（多信号打分） ─────────────────────────────
 
+    def _detect_scene_end(self, user_message: str) -> bool:
+        """检测用户消息是否表示当前场景结束。"""
+        if not user_message:
+            return False
+        for signal in SCENE_END_SIGNALS:
+            if signal in user_message:
+                return True
+        return False
+
+    def _has_keyword_match(self, name: str, info: Dict[str, Any],
+                           user_message: str) -> bool:
+        """检查技能是否有关键词或触发示例命中（强信号）。
+
+        用于场景结束时判断技能是否「绝对用不上」。
+        仅看强信号（关键词+触发示例），不看类别等弱信号。
+        """
+        if not user_message:
+            return False
+        metadata = info.get("metadata", {})
+        msg_lower = user_message.lower()
+
+        # 关键词命中
+        for kw in metadata.get("keywords", []):
+            if len(kw) >= 2 and kw.lower() in msg_lower:
+                return True
+
+        # 触发示例重叠
+        for example in metadata.get("trigger_examples", []):
+            if self._count_word_overlap(user_message, example) >= 2:
+                return True
+
+        return False
+
     def load_skills(self, user_message: str = "") -> str:
         """根据用户消息智能加载技能，返回可注入 system prompt 的文本。
 
-        v2: 多信号打分筛选，三层独立预算，懒加载组合优先。
+        v3: T1 无上限+会话粘性(激活/冷却/下线)，T2/T3 打分筛选+懒加载组合。
 
         Args:
             user_message: 当前用户消息文本，用于匹配筛选。
@@ -425,43 +476,103 @@ class SkillEvolution:
         if total_skills <= SMALL_POOL_THRESHOLD:
             return self._inject_all_skills()
 
-        # 按层分别打分筛选
-        scored: List[Tuple[str, float, str, Dict]] = []  # (name, score, tier, info)
+        # 检测场景结束信号
+        scene_ended = self._detect_scene_end(user_message)
+
+        # ── T1 处理：会话粘性机制 ──
+        t1_injected: List[str] = []
+
+        for name, info in self.skills_registry.items():
+            if info.get("tier", "auto") != "manual":
+                continue
+
+            state = self._t1_states.get(name)
+
+            if state == "active":
+                if scene_ended:
+                    # 场景结束：用强信号判断是否绝对用不上
+                    if not self._has_keyword_match(name, info, user_message):
+                        # 无关键词/触发命中 → 绝对用不上 → 立即下线
+                        self._t1_states.pop(name, None)
+                        self._t1_cooling_rounds.pop(name, None)
+                        continue
+                    score = self._score_skill(name, info, user_message)
+                    if score >= SCORE_THRESHOLD:
+                        # 仍然高度相关 → 保持激活
+                        t1_injected.append(name)
+                        continue
+                    else:
+                        # 有弱关联但不够强 → 进入冷却
+                        self._t1_states[name] = "cooling"
+                        self._t1_cooling_rounds[name] = 0
+                        t1_injected.append(name)
+                        continue
+                else:
+                    # 场景继续 → 始终注入
+                    t1_injected.append(name)
+                    continue
+
+            elif state == "cooling":
+                cooling_rounds = self._t1_cooling_rounds.get(name, 0)
+                if cooling_rounds >= COOLING_ROUNDS:
+                    # 冷却期结束 → 下线
+                    self._t1_states.pop(name, None)
+                    self._t1_cooling_rounds.pop(name, None)
+                    continue
+
+                # 冷却期内：始终注入（粘性保活）
+                t1_injected.append(name)
+
+                # 检查是否有关键词命中 → 重新激活
+                score = self._score_skill(name, info, user_message)
+                if score >= SCORE_THRESHOLD:
+                    self._t1_states[name] = "active"
+                    self._t1_cooling_rounds.pop(name, None)
+                else:
+                    self._t1_cooling_rounds[name] = cooling_rounds + 1
+                continue
+
+            else:
+                # 未激活：正常打分
+                score = self._score_skill(name, info, user_message)
+                if score >= SCORE_THRESHOLD:
+                    self._t1_states[name] = "active"
+                    t1_injected.append(name)
+
+        # ── T2/T3 处理：打分筛选 ──
+        scored: List[Tuple[str, float, str, Dict]] = []
 
         for name, info in self.skills_registry.items():
             tier = info.get("tier", "auto")
+            if tier == "manual":
+                continue  # T1 已处理
             score = self._score_skill(name, info, user_message)
             if score >= SCORE_THRESHOLD:
                 scored.append((name, score, tier, info))
 
-        # 按分数降序排列
         scored.sort(key=lambda x: x[1], reverse=True)
 
-        # 三层独立预算
-        injected: List[str] = []
-        excluded_by_composite: set = set()  # 被T3组合技能排除的父技能
-        tier_counts = {"manual": 0, "auto": 0, "composite": 0}
-        max_per_tier = {
-            "manual": MAX_INJECT_T1,
-            "auto": MAX_INJECT_T2,
-            "composite": MAX_INJECT_T3,
-        }
+        excluded_by_composite: set = set()
+        tier_counts = {"auto": 0, "composite": 0}
+        max_per_tier = {"auto": MAX_INJECT_T2, "composite": MAX_INJECT_T3}
 
+        t2t3_injected: List[str] = []
         for name, score, tier, info in scored:
-            if len(injected) >= MAX_INJECT_TOTAL:
+            if len(t2t3_injected) >= MAX_INJECT_T2T3:
                 break
             if tier_counts.get(tier, 0) >= max_per_tier.get(tier, MAX_INJECT_T2):
                 continue
-            # 被T3排除的父技能跳过
             if name in excluded_by_composite:
                 continue
-            # T3 组合技能命中时，排除其父技能（已入和未入都排除）
             if tier == "composite":
                 parents = info.get("metadata", {}).get("parents", [])
                 excluded_by_composite.update(parents)
-                injected = [n for n in injected if n not in parents]
-            injected.append(name)
+                t2t3_injected = [n for n in t2t3_injected if n not in parents]
+            t2t3_injected.append(name)
             tier_counts[tier] = tier_counts.get(tier, 0) + 1
+
+        # 合并 T1 + T2/T3
+        injected = t1_injected + t2t3_injected
 
         # 兜底：一条都没命中，加载使用频率最高的 T2 技能
         if not injected:
@@ -498,7 +609,7 @@ class SkillEvolution:
         return "\n".join(parts) if len(parts) > 3 else ""
 
     def _inject_all_skills(self) -> str:
-        """小池子模式：注入所有技能。"""
+        """小池子模式：注入所有技能。T1技能设为激活态。"""
         parts: List[str] = ["", "## 已积累的技能经验", ""]
         loaded: List[str] = []
         for name, info in self.skills_registry.items():
@@ -510,6 +621,9 @@ class SkillEvolution:
                 tier = info.get("tier", "auto")
                 parts.append(f"### 技能：{name}（{tier}）\n\n{content}\n")
                 loaded.append(name)
+                # T1 技能在小池子模式下也设为激活态
+                if tier == "manual" and name not in self._t1_states:
+                    self._t1_states[name] = "active"
             except OSError:
                 continue
         self._last_loaded_skills = loaded
@@ -864,12 +978,14 @@ class SkillEvolution:
             except Exception:
                 pass
 
-        # 跟踪共现
-        if len(loaded) >= 2:
-            self._track_cooccurrence(loaded)
-
-            # 检查是否触发懒加载组合
-            self._check_compose_trigger(loaded)
+        # 跟踪共现（仅T2技能参与组合）
+        t2_loaded = [
+            n for n in loaded
+            if self.skills_registry.get(n, {}).get("tier", "auto") == "auto"
+        ]
+        if len(t2_loaded) >= 2:
+            self._track_cooccurrence(t2_loaded)
+            self._check_compose_trigger(t2_loaded)
 
         # 更新零使用计数
         self._update_zero_use_rounds(loaded)
