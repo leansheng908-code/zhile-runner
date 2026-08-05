@@ -82,6 +82,9 @@ from provider_runtime import (
     CodeProvider,
 )
 
+# P0.61: 操作审批工作流
+from approval_gate import ApprovalGate, RiskLevel
+
 # P0.24: 易经认知编码系统
 import sys as _sys, os as _os
 _yi_jing_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'yi_jing')
@@ -500,6 +503,21 @@ class ZhileCore:
             except Exception as e:
                 print(f"⚠ [Core] ProviderRuntime 初始化失败，降级跳过: {e}")
                 self.provider_runtime = None
+
+        # ─── P0.61: 操作审批工作流 ────────────────────
+        self.approval_gate = None
+        try:
+            ag_config = self.config.get("approval_gate", {})
+            self.approval_gate = ApprovalGate(
+                config=ag_config,
+                narration=self.narration,
+                ledger=self.provider_runtime.ledger if self.provider_runtime else None,
+            )
+            print(f"[Core] ApprovalGate 已初始化 "
+                  f"(enabled: {self.approval_gate._enabled})")
+        except Exception as e:
+            print(f"⚠ [Core] ApprovalGate 初始化失败，降级跳过: {e}")
+            self.approval_gate = None
 
     @staticmethod
     def _load_config(config_path: str) -> dict:
@@ -2154,6 +2172,34 @@ class ZhileCore:
         if not self.provider_runtime:
             return []
         return self.provider_runtime.pending_works()
+
+    # ─── P0.61: 审批工作流 ────────────────────
+
+    def approve_action(self, approval_id: str, approved: bool) -> bool:
+        """手动审批操作（供 CLI 调用）
+
+        Args:
+            approval_id: 审批唯一标识
+            approved: True=批准, False=拒绝
+
+        Returns:
+            是否成功解决
+        """
+        if not self.approval_gate:
+            return False
+        return self.approval_gate.resolve(approval_id, approved)
+
+    def pending_approvals(self) -> list:
+        """获取待审批操作列表"""
+        if not self.approval_gate:
+            return []
+        return self.approval_gate.pending_approvals()
+
+    def check_approval(self, approval_id: str) -> str:
+        """查询审批状态"""
+        if not self.approval_gate:
+            return "unknown"
+        return self.approval_gate.check_approval(approval_id)
 
     # ─── 生命周期 ─────────────────────────────
 
