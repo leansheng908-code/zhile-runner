@@ -372,6 +372,402 @@ class DeepSeekProvider(ModelProvider):
                 continue
 
 
+# ─── OpenAI Provider ───────────────────────────────────
+
+class OpenAIProvider(ModelProvider):
+    """OpenAI API Provider 实现。
+
+    支持 GPT-4o / GPT-4-turbo / GPT-3.5-turbo 等模型，
+    使用 OpenAI 标准 API 格式（与 DeepSeek 兼容）。
+
+    配置示例（config.json 的 llm 段）：
+        {
+            "provider": "openai",
+            "api_key": "sk-xxx",
+            "model": "gpt-4o",
+            "base_url": "https://api.openai.com/v1"
+        }
+    """
+
+    def __init__(self, config: Dict[str, Any]) -> None:
+        config = dict(config)
+        config["api_key"] = os.environ.get(
+            "OPENAI_API_KEY", config.get("api_key", "")
+        )
+        config.setdefault("base_url", "https://api.openai.com/v1")
+        config.setdefault("model", "gpt-4o")
+        super().__init__(config)
+
+        if not self.api_key:
+            raise ValueError(
+                "API Key 未配置，请设置环境变量 OPENAI_API_KEY "
+                "或在 config.json 中配置 llm.api_key"
+            )
+
+    def chat(
+        self,
+        messages: List[Dict[str, Any]],
+        stream: bool = False,
+        **kwargs: Any,
+    ) -> Generator[str, None, None] | str:
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+        }
+        payload: Dict[str, Any] = {
+            "model": kwargs.get("model", self.model),
+            "messages": messages,
+            "temperature": kwargs.get("temperature", self.temperature),
+            "top_p": kwargs.get("top_p", self.top_p),
+            "max_tokens": kwargs.get("max_tokens", self.max_tokens),
+            "frequency_penalty": kwargs.get("frequency_penalty", self.frequency_penalty),
+            "presence_penalty": kwargs.get("presence_penalty", self.presence_penalty),
+            "stream": stream,
+        }
+        timeout = kwargs.get("timeout", self.timeout if stream else DEFAULT_TIMEOUT)
+
+        try:
+            response = requests.post(
+                f"{self.base_url}/chat/completions",
+                headers=headers,
+                json=payload,
+                stream=stream,
+                timeout=timeout,
+            )
+            response.raise_for_status()
+        except requests.exceptions.ConnectionError:
+            raise ConnectionError("无法连接 OpenAI API，请检查网络或代理设置")
+        except requests.exceptions.Timeout:
+            raise TimeoutError(f"API 请求超时（{timeout}s）")
+        except requests.exceptions.HTTPError as e:
+            error_msg = f"OpenAI API 错误 ({response.status_code})"
+            try:
+                detail = response.json().get("error", {})
+                error_msg += f": {detail.get('message', str(e))}"
+            except Exception:
+                error_msg += f": {str(e)}"
+            raise Exception(error_msg)
+
+        if stream:
+            return self._parse_stream(response)
+        else:
+            data = response.json()
+            return data["choices"][0]["message"]["content"]
+
+    def chat_with_tools(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+        **kwargs: Any,
+    ) -> Tuple[str, Optional[List[Dict[str, Any]]]]:
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+        }
+        payload: Dict[str, Any] = {
+            "model": kwargs.get("model", self.model),
+            "messages": messages,
+            "temperature": kwargs.get("temperature", self.temperature),
+            "max_tokens": kwargs.get("max_tokens", self.max_tokens),
+            "stream": False,
+            "tools": tools,
+            "tool_choice": kwargs.get("tool_choice", "auto"),
+        }
+        timeout = kwargs.get("timeout", DEFAULT_TIMEOUT)
+
+        try:
+            response = requests.post(
+                f"{self.base_url}/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=timeout,
+            )
+            response.raise_for_status()
+        except requests.exceptions.ConnectionError:
+            raise ConnectionError("无法连接 OpenAI API")
+        except requests.exceptions.Timeout:
+            raise TimeoutError(f"API 请求超时（{timeout}s）")
+        except requests.exceptions.HTTPError as e:
+            error_msg = f"OpenAI API 错误 ({response.status_code})"
+            try:
+                detail = response.json().get("error", {})
+                error_msg += f": {detail.get('message', str(e))}"
+            except Exception:
+                error_msg += f": {str(e)}"
+            raise Exception(error_msg)
+
+        data = response.json()
+        choice = data["choices"][0]["message"]
+        content: str = choice.get("content") or ""
+        tool_calls: Optional[List[Dict[str, Any]]] = choice.get("tool_calls")
+        return content, tool_calls
+
+    def _parse_stream(self, response: requests.Response) -> Generator[str, None, None]:
+        for line in response.iter_lines():
+            if not line:
+                continue
+            line_str = line.decode("utf-8")
+            if not line_str.startswith("data: "):
+                continue
+            data_str = line_str[6:]
+            if data_str.strip() == "[DONE]":
+                break
+            try:
+                chunk = json.loads(data_str)
+                delta = chunk["choices"][0]["delta"]
+                if "content" in delta and delta["content"]:
+                    yield delta["content"]
+            except (json.JSONDecodeError, KeyError, IndexError):
+                continue
+
+
+# ─── Claude Provider ───────────────────────────────────
+
+class ClaudeProvider(ModelProvider):
+    """Anthropic Claude API Provider 实现。
+
+    支持 Claude-3.5-Sonnet / Claude-3-Opus / Claude-3-Haiku 等模型。
+    使用 Anthropic 原生 API 格式（与 OpenAI 格式不同）。
+
+    主要差异：
+      - 端点: /v1/messages（非 /v1/chat/completions）
+      - 认证: x-api-key 头（非 Authorization Bearer）
+      - system 消息: 顶层 system 字段（非 messages 内）
+      - 响应: content[0].text（非 choices[0].message.content）
+      - 流式: event-based SSE（非 data: JSON）
+
+    配置示例（config.json 的 llm 段）：
+        {
+            "provider": "claude",
+            "api_key": "sk-ant-xxx",
+            "model": "claude-sonnet-4-20250514",
+            "base_url": "https://api.anthropic.com"
+        }
+    """
+
+    # Anthropic API 版本
+    ANTHROPIC_VERSION = "2023-06-01"
+
+    def __init__(self, config: Dict[str, Any]) -> None:
+        config = dict(config)
+        config["api_key"] = os.environ.get(
+            "ANTHROPIC_API_KEY", config.get("api_key", "")
+        )
+        config.setdefault("base_url", "https://api.anthropic.com")
+        config.setdefault("model", "claude-sonnet-4-20250514")
+        # Claude 的 max_tokens 上限更大
+        config.setdefault("max_tokens", 1024)
+        super().__init__(config)
+
+        if not self.api_key:
+            raise ValueError(
+                "API Key 未配置，请设置环境变量 ANTHROPIC_API_KEY "
+                "或在 config.json 中配置 llm.api_key"
+            )
+
+    def _split_system(self, messages: List[Dict[str, Any]]) -> Tuple[str, List[Dict[str, Any]]]:
+        """将 system 消息从 messages 中分离。
+
+        Claude API 要求 system 作为顶层参数，不能放在 messages 里。
+
+        Args:
+            messages: 原始消息列表（OpenAI 格式）。
+
+        Returns:
+            元组 (system_text, filtered_messages)。
+        """
+        system_parts = []
+        filtered = []
+        for msg in messages:
+            if msg.get("role") == "system":
+                if msg.get("content"):
+                    system_parts.append(str(msg["content"]))
+            else:
+                filtered.append(msg)
+        return "\n\n".join(system_parts), filtered
+
+    def _convert_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """将 OpenAI 格式消息转换为 Claude 格式。
+
+        Claude 要求 user/assistant 交替，且不支持 system 角色。
+        system 已由 _split_system 处理。
+        """
+        converted = []
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            # Claude 只接受 user 和 assistant
+            if role not in ("user", "assistant"):
+                role = "user"
+            converted.append({"role": role, "content": str(content)})
+        return converted
+
+    def chat(
+        self,
+        messages: List[Dict[str, Any]],
+        stream: bool = False,
+        **kwargs: Any,
+    ) -> Generator[str, None, None] | str:
+        system_text, filtered_msgs = self._split_system(messages)
+        claude_msgs = self._convert_messages(filtered_msgs)
+
+        headers = {
+            "Content-Type": "application/json",
+            "x-api-key": self.api_key,
+            "anthropic-version": self.ANTHROPIC_VERSION,
+        }
+        payload: Dict[str, Any] = {
+            "model": kwargs.get("model", self.model),
+            "messages": claude_msgs,
+            "max_tokens": kwargs.get("max_tokens", self.max_tokens),
+            "temperature": kwargs.get("temperature", self.temperature),
+            "top_p": kwargs.get("top_p", self.top_p),
+            "stream": stream,
+        }
+        if system_text:
+            payload["system"] = system_text
+
+        timeout = kwargs.get("timeout", self.timeout if stream else DEFAULT_TIMEOUT)
+
+        try:
+            response = requests.post(
+                f"{self.base_url}/v1/messages",
+                headers=headers,
+                json=payload,
+                stream=stream,
+                timeout=timeout,
+            )
+            response.raise_for_status()
+        except requests.exceptions.ConnectionError:
+            raise ConnectionError("无法连接 Anthropic API，请检查网络或代理设置")
+        except requests.exceptions.Timeout:
+            raise TimeoutError(f"API 请求超时（{timeout}s）")
+        except requests.exceptions.HTTPError as e:
+            error_msg = f"Claude API 错误 ({response.status_code})"
+            try:
+                detail = response.json().get("error", {})
+                error_msg += f": {detail.get('message', str(e))}"
+            except Exception:
+                error_msg += f": {str(e)}"
+            raise Exception(error_msg)
+
+        if stream:
+            return self._parse_stream(response)
+        else:
+            data = response.json()
+            # Claude 响应: {"content": [{"type": "text", "text": "..."}], ...}
+            content_blocks = data.get("content", [])
+            return "".join(
+                block.get("text", "") for block in content_blocks if block.get("type") == "text"
+            )
+
+    def chat_with_tools(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+        **kwargs: Any,
+    ) -> Tuple[str, Optional[List[Dict[str, Any]]]]:
+        # Claude 的 function calling 格式与 OpenAI 不同
+        # 转换 OpenAI tools -> Claude tools
+        claude_tools = []
+        for tool in tools:
+            if tool.get("type") == "function":
+                func = tool.get("function", {})
+                claude_tools.append({
+                    "name": func.get("name", ""),
+                    "description": func.get("description", ""),
+                    "input_schema": func.get("parameters", {"type": "object"}),
+                })
+
+        system_text, filtered_msgs = self._split_system(messages)
+        claude_msgs = self._convert_messages(filtered_msgs)
+
+        headers = {
+            "Content-Type": "application/json",
+            "x-api-key": self.api_key,
+            "anthropic-version": self.ANTHROPIC_VERSION,
+        }
+        payload: Dict[str, Any] = {
+            "model": kwargs.get("model", self.model),
+            "messages": claude_msgs,
+            "max_tokens": kwargs.get("max_tokens", self.max_tokens),
+            "temperature": kwargs.get("temperature", self.temperature),
+            "stream": False,
+            "tools": claude_tools,
+        }
+        if system_text:
+            payload["system"] = system_text
+
+        timeout = kwargs.get("timeout", DEFAULT_TIMEOUT)
+
+        try:
+            response = requests.post(
+                f"{self.base_url}/v1/messages",
+                headers=headers,
+                json=payload,
+                timeout=timeout,
+            )
+            response.raise_for_status()
+        except requests.exceptions.ConnectionError:
+            raise ConnectionError("无法连接 Anthropic API")
+        except requests.exceptions.Timeout:
+            raise TimeoutError(f"API 请求超时（{timeout}s）")
+        except requests.exceptions.HTTPError as e:
+            error_msg = f"Claude API 错误 ({response.status_code})"
+            try:
+                detail = response.json().get("error", {})
+                error_msg += f": {detail.get('message', str(e))}"
+            except Exception:
+                error_msg += f": {str(e)}"
+            raise Exception(error_msg)
+
+        data = response.json()
+        content_parts = []
+        tool_calls: List[Dict[str, Any]] = []
+
+        for block in data.get("content", []):
+            if block.get("type") == "text":
+                content_parts.append(block.get("text", ""))
+            elif block.get("type") == "tool_use":
+                tool_calls.append({
+                    "id": block.get("id", ""),
+                    "type": "function",
+                    "function": {
+                        "name": block.get("name", ""),
+                        "arguments": json.dumps(block.get("input", {})),
+                    },
+                })
+
+        content = "".join(content_parts)
+        return content, (tool_calls if tool_calls else None)
+
+    def _parse_stream(self, response: requests.Response) -> Generator[str, None, None]:
+        """解析 Anthropic SSE 流式响应。
+
+        Claude 的流式格式与 OpenAI 不同：
+          event: content_block_delta
+          data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"..."}}
+        """
+        for line in response.iter_lines():
+            if not line:
+                continue
+            line_str = line.decode("utf-8")
+            if not line_str.startswith("data: "):
+                continue
+            data_str = line_str[6:]
+            try:
+                chunk = json.loads(data_str)
+                chunk_type = chunk.get("type", "")
+                if chunk_type == "content_block_delta":
+                    delta = chunk.get("delta", {})
+                    if delta.get("type") == "text_delta" and delta.get("text"):
+                        yield delta["text"]
+                elif chunk_type == "message_stop":
+                    break
+            except (json.JSONDecodeError, KeyError, IndexError):
+                continue
+
+
 # ─── Provider 工厂 ──────────────────────────────────────
 
 class ProviderFactory:
@@ -380,6 +776,11 @@ class ProviderFactory:
     使用工厂模式根据配置创建对应的 Provider 实例。
     支持动态注册新的 Provider 类型。
 
+    内置 Provider:
+      - deepseek: DeepSeek API (OpenAI 兼容格式)
+      - openai: OpenAI API (GPT-4o 等)
+      - claude: Anthropic Claude API (Claude-3.5 等)
+
     Attributes:
         _providers: 已注册的 Provider 类映射。
     """
@@ -387,6 +788,8 @@ class ProviderFactory:
     # 内置 Provider 注册
     _BUILTIN_PROVIDERS: Dict[str, type] = {
         "deepseek": DeepSeekProvider,
+        "openai": OpenAIProvider,
+        "claude": ClaudeProvider,
     }
 
     def __init__(self) -> None:
