@@ -356,6 +356,8 @@ class CLI:
             self._print_help()
         elif main_cmd == "/test":
             self._test_connection(silent=False)
+        elif main_cmd == "/arch":
+            self._handle_arch(parts)
         else:
             print(f"{Color.DIM}未知命令，输入 /help 查看可用命令{Color.RESET}")
 
@@ -2945,10 +2947,111 @@ class CLI:
             print(f"{Color.RED}有 {fail_count} 个系统失败，需排查{Color.RESET}")
         print()
 
+    # ─── P0.26 Phase 3: 架构自认知 ──────────────
+
+    def _handle_arch(self, parts: list):
+        """处理 /arch 命令 — 架构自认知"""
+        if not self.core or not getattr(self.core, "arch_map", None):
+            print(f"{Color.DIM}架构映射未启用{Color.RESET}")
+            return
+
+        sub = parts[1] if len(parts) > 1 else "show"
+        am = self.core.arch_map
+
+        if sub == "show":
+            info = self.core.arch_show()
+            if not info.get("enabled"):
+                print(f"{Color.DIM}架构映射未启用{Color.RESET}")
+                return
+            print(f"{Color.DIM}─── 架构概览 ───{Color.RESET}")
+            print(f"  文件数: {info['file_count']}")
+            print(f"  模块数: {info['module_count']}")
+            print(f"  扩展点: {info['extension_point_count']}")
+            print(f"  注册点: {info['registration_point_count']}")
+            print(f"  扫描时间: {info.get('scan_time', '?')}")
+
+        elif sub == "module" and len(parts) > 2:
+            mod_name = parts[2]
+            mod = am.get_module_info(mod_name)
+            if not mod:
+                print(f"{Color.DIM}未找到模块: {mod_name}{Color.RESET}")
+                return
+            print(f"{Color.DIM}─── 模块: {mod_name} ───{Color.RESET}")
+            print(f"  文件: {mod.get('file', '?')}")
+            print(f"  行数: {mod.get('lines', 0)}")
+            if mod.get("purpose"):
+                print(f"  用途: {mod['purpose']}")
+            if mod.get("classes"):
+                print(f"  类:")
+                for cls_name, cls_info in mod["classes"].items():
+                    ext_tag = f" {Color.YELLOW}[扩展点]{Color.RESET}" if cls_info.get("is_extension_point") else ""
+                    print(f"    {Color.CYAN}{cls_name}{Color.RESET}{ext_tag}")
+                    if cls_info.get("bases"):
+                        print(f"      基类: {', '.join(cls_info['bases'])}")
+                    if cls_info.get("abstract_methods"):
+                        print(f"      抽象方法: {', '.join(cls_info['abstract_methods'])}")
+                    if cls_info.get("public_methods"):
+                        print(f"      公开方法: {', '.join(cls_info['public_methods'][:8])}")
+            if mod.get("functions"):
+                print(f"  函数: {', '.join(mod['functions'][:10])}")
+            if mod.get("imports"):
+                print(f"  依赖: {', '.join(mod['imports'][:10])}")
+
+        elif sub == "extend":
+            eps = am.get_extension_points()
+            print(f"{Color.DIM}─── 扩展点 ({len(eps)}) ───{Color.RESET}")
+            for ep in eps:
+                print(f"  {Color.CYAN}{ep['name']}{Color.RESET} ({ep['module']})")
+                print(f"    {ep.get('description', '')}")
+                if ep.get("abstract_methods"):
+                    print(f"    抽象方法: {', '.join(ep['abstract_methods'])}")
+                if ep.get("how_to_extend"):
+                    print(f"    扩展方式: {ep['how_to_extend']}")
+                if ep.get("example_file"):
+                    print(f"    示例: {ep['example_file']}")
+
+        elif sub == "suggest" and len(parts) > 2:
+            desc = " ".join(parts[2:])
+            result = am.suggest_insertion(desc)
+            s = result["suggestion"]
+            print(f"{Color.DIM}─── 插入点建议 ───{Color.RESET}")
+            print(f"  需求: {desc}")
+            if s.get("extension_point"):
+                print(f"  扩展点: {Color.CYAN}{s['extension_point']}{Color.RESET}")
+            print(f"  目标模块: {s.get('module', '?')}")
+            print(f"  扩展方式: {s.get('how_to', '?')}")
+            print(f"  参考示例: {s.get('example', '?')}")
+            if result.get("alternatives"):
+                print(f"  {Color.DIM}备选:{Color.RESET}")
+                for alt in result["alternatives"]:
+                    print(f"    - {alt.get('module', '?')}: {alt.get('how_to', '?')[:60]}")
+
+        elif sub == "refresh":
+            print(f"{Color.DIM}重建架构映射...{Color.RESET}")
+            result = self.core.arch_refresh()
+            if result.get("success"):
+                print(f"  {Color.GREEN}✅ {result['modules']} 模块, {result['files']} 文件{Color.RESET}")
+            else:
+                print(f"  {Color.RED}❌ {result.get('error', '失败')}{Color.RESET}")
+
+        elif sub == "deps":
+            dep_graph = am.get_dependency_graph()
+            print(f"{Color.DIM}─── 模块依赖图 ({len(dep_graph)} 个模块) ───{Color.RESET}")
+            for mod, deps in sorted(dep_graph.items()):
+                print(f"  {Color.CYAN}{mod}{Color.RESET} → {', '.join(deps[:6])}")
+
+        else:
+            print(f"  {Color.DIM}/arch show | /arch module <name> | /arch extend | "
+                  f"/arch suggest <描述> | /arch refresh | /arch deps{Color.RESET}")
+
     def _print_help(self):
         print(f"{Color.DIM}─── 命令 ───{Color.RESET}")
         print(f"  {Color.CYAN}/help{Color.RESET}              显示帮助")
         print(f"  {Color.CYAN}/status{Color.RESET}            查看状态")
+        print(f"  {Color.CYAN}/arch show{Color.RESET}         架构概览")
+        print(f"  {Color.CYAN}/arch extend{Color.RESET}       查看扩展点")
+        print(f"  {Color.CYAN}/arch suggest{Color.RESET}      建议插入点")
+        print(f"  {Color.CYAN}/arch deps{Color.RESET}         模块依赖图")
         print(f"  {Color.CYAN}/psi{Color.RESET}               查看内在状态")
         print(f"  {Color.CYAN}/diary auto{Color.RESET}        自动写日记")
         print(f"  {Color.CYAN}/diary write <内容>{Color.RESET} 手动写日记")
