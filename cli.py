@@ -1982,6 +1982,8 @@ class CLI:
                     print(f"  {Color.DIM}stderr:{Color.RESET}")
                     for line in result["stderr"].rstrip("\n").split("\n")[:5]:
                         print(f"    {line}")
+            # P0.46④: 展示写后自检结果
+            self._print_lint(result)
 
         elif sub == "debug" and len(parts) > 2:
             code = " ".join(parts[2:])
@@ -2000,6 +2002,8 @@ class CLI:
                     last = result["history"][-1]
                     if last.get("result", {}).get("error_message"):
                         print(f"  最后错误: {last['result']['error_message']}")
+            # P0.46④: 展示写后自检结果
+            self._print_lint(result)
 
         elif sub == "history":
             history = self.core.code_history()
@@ -2014,6 +2018,23 @@ class CLI:
 
         else:
             print(f"  {Color.DIM}/code status | /code run <代码> | /code debug <代码> | /code history{Color.RESET}")
+
+    def _print_lint(self, result: dict):
+        """P0.46④: 展示写后自检结果"""
+        lint = result.get("lint")
+        if not lint or lint.get("checked", 0) == 0:
+            return
+        checked = lint["checked"]
+        passed = lint["passed"]
+        failed = lint["failed"]
+        if failed == 0:
+            print(f"  {Color.DIM}写后自检: {checked}个文件 全部通过 ✅{Color.RESET}")
+        else:
+            print(f"  {Color.RED}写后自检: {checked}个文件, {passed}通过, {failed}失败 ❌{Color.RESET}")
+            for err in lint.get("errors", []):
+                print(f"    {Color.RED}{err['file']}{Color.RESET}")
+                for msg in err.get("errors", []):
+                    print(f"      {msg}")
 
     # ─── P0.36: 配置查看 + 新闻推送 ──────────
 
@@ -2291,13 +2312,23 @@ class CLI:
             print(f"{Color.DIM}核心未初始化{Color.RESET}")
             return
         llm = self.core.llm
+        # 判断是否使用插件化 Provider
+        is_adapter = hasattr(llm, 'provider')
+        provider_type = type(llm.provider).__name__ if is_adapter else type(llm).__name__
         print(f"{Color.DIM}─── 模型Provider ───{Color.RESET}")
-        print(f"  {Color.CYAN}Provider:{Color.RESET} {llm.config.get('provider', 'deepseek')}")
+        print(f"  {Color.CYAN}运行模式:{Color.RESET} {'插件化(ProviderFactory)' if is_adapter else ' legacy(LLMProvider)'}")
+        print(f"  {Color.CYAN}Provider类:{Color.RESET} {provider_type}")
         print(f"  {Color.CYAN}模型:{Color.RESET} {llm.model}")
-        print(f"  {Color.CYAN}Base URL:{Color.RESET} {llm.config.get('base_url', 'N/A')}")
-        print(f"  {Color.CYAN}温度:{Color.RESET} {llm.config.get('temperature', 'N/A')}")
-        print(f"  {Color.CYAN}Max Tokens:{Color.RESET} {llm.config.get('max_tokens', 'N/A')}")
-        print(f"  {Color.DIM}提示: 可通过 model_provider.py 注册新Provider{Color.RESET}")
+        print(f"  {Color.CYAN}Base URL:{Color.RESET} {llm.config.get('base_url', 'N/A') if hasattr(llm, 'config') else getattr(llm, 'base_url', 'N/A')}")
+        print(f"  {Color.CYAN}温度:{Color.RESET} {llm.config.get('temperature', 'N/A') if hasattr(llm, 'config') else getattr(llm, 'temperature', 'N/A')}")
+        print(f"  {Color.CYAN}Max Tokens:{Color.RESET} {llm.config.get('max_tokens', 'N/A') if hasattr(llm, 'config') else getattr(llm, 'max_tokens', 'N/A')}")
+        # 显示已注册的 Provider 列表
+        if is_adapter:
+            from model_provider import ProviderFactory
+            factory = ProviderFactory()
+            registered = factory.list_providers()
+            print(f"  {Color.CYAN}已注册Provider:{Color.RESET} {', '.join(registered)}")
+        print(f"  {Color.DIM}提示: 在config.json llm.provider中指定, 或通过ProviderFactory.register_provider()注册新Provider{Color.RESET}")
 
     def _handle_schedule(self, parts):
         """P0.46③: 自然语言Cron调度"""
