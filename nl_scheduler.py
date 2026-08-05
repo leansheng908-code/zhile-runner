@@ -293,6 +293,9 @@ cron格式: 分 时 日 月 周
 
 task_type从以下选择: 定时汇总, 定时检查, 定时提醒, 定时推送, 定时清理, 定时备份, 其他"""
 
+    # 持久化文件路径
+    PERSIST_FILE = "scheduled_tasks.json"
+
     def __init__(self, config: Optional[dict] = None):
         """
         初始化调度器
@@ -310,6 +313,9 @@ task_type从以下选择: 定时汇总, 定时检查, 定时提醒, 定时推送
         # 任务表
         self._tasks: Dict[str, ScheduledTask] = {}
         self._lock = threading.Lock()
+
+        # 默认回调（由core.py设置，用于任务触发时发送消息）
+        self._default_callback: Optional[Callable] = None
 
     def _load_api_config(self, cfg: dict):
         """加载API配置：优先config.json，其次环境变量"""
@@ -599,6 +605,7 @@ task_type从以下选择: 定时汇总, 定时检查, 定时提醒, 定时推送
         # 计算下次运行并启动Timer
         task.schedule_next()
         print(f"  ✅ 定时任务已创建: {task_id} | {description} | cron={cron}")
+        self.save_tasks()
 
         return task_id
 
@@ -629,6 +636,7 @@ task_type从以下选择: 定时汇总, 定时检查, 定时提醒, 定时推送
             task.cancel()
             del self._tasks[task_id]
         print(f"  🗑 定时任务已取消: {task_id}")
+        self.save_tasks()
         return True
 
     def cancel_all(self):
@@ -638,6 +646,7 @@ task_type从以下选择: 定时汇总, 定时检查, 定时提醒, 定时推送
                 task.cancel()
             self._tasks.clear()
         print("  🗑 所有定时任务已取消")
+        self.save_tasks()
 
     def get_task(self, task_id: str) -> Optional[dict]:
         """获取单个任务状态"""
@@ -657,6 +666,56 @@ task_type从以下选择: 定时汇总, 定时检查, 定时提醒, 定时推送
             "model": self.model,
             "base_url": self.base_url,
         }
+
+    # ─── 持久化 ───────────────────────────────────
+
+    def set_default_callback(self, callback: Callable):
+        """设置默认回调，用于从存档恢复任务时绑定"""
+        self._default_callback = callback
+
+    def save_tasks(self):
+        """保存当前所有任务到JSON文件（仅存cron/description，不存callback）"""
+        with self._lock:
+            persist_data = []
+            for task in self._tasks.values():
+                if task.active:
+                    persist_data.append({
+                        "task_id": task.task_id,
+                        "cron": task.cron,
+                        "description": task.description,
+                    })
+        try:
+            with open(self.PERSIST_FILE, "w", encoding="utf-8") as f:
+                json.dump(persist_data, f, ensure_ascii=False, indent=2)
+        except (IOError, OSError) as e:
+            print(f"  ⚠ 定时任务保存失败: {e}")
+
+    def load_tasks(self):
+        """从JSON文件加载任务并重建（使用_default_callback）"""
+        if self._default_callback is None:
+            return  # 没有默认回调，无法恢复
+
+        try:
+            with open(self.PERSIST_FILE, "r", encoding="utf-8") as f:
+                persist_data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError, IOError):
+            return
+
+        restored = 0
+        for item in persist_data:
+            cron = item.get("cron", "")
+            desc = item.get("description", "")
+            task_id = item.get("task_id", f"task_{uuid.uuid4().hex[:8]}")
+            if not CronParser.validate(cron):
+                continue
+            task = ScheduledTask(task_id, cron, self._default_callback, desc)
+            with self._lock:
+                self._tasks[task_id] = task
+            task.schedule_next()
+            restored += 1
+
+        if restored:
+            print(f"  📂 恢复 {restored} 个定时任务")
 
 
 # ─── 独立运行入口 ─────────────────────────────────
