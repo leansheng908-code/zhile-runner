@@ -191,6 +191,7 @@ class MemorySystem:
         self.memories_file = self.memory_dir / "memories.json"
         self.session_file = self.memory_dir / "session.json"
         self.archive_file = self.memory_dir / "archive.json"
+        self.outbox_file = self.memory_dir / ".outbox.json"  # Outbox: 崩溃恢复
 
         self.memories: List[Memory] = self._load_memories()
         self.session_history: List[Dict] = self._load_session()
@@ -206,6 +207,18 @@ class MemorySystem:
     # ─── 持久化 ───────────────────────────────
 
     def _load_memories(self) -> List[Memory]:
+        # Outbox恢复：如果outbox存在，说明上次保存时崩溃，用outbox恢复
+        if self.outbox_file.exists():
+            try:
+                with open(self.outbox_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                # 用outbox覆盖主文件
+                with open(self.memories_file, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                self.outbox_file.unlink()
+            except (json.JSONDecodeError, TypeError, OSError):
+                pass  # outbox损坏则忽略，用主文件
+
         if not self.memories_file.exists():
             return []
         try:
@@ -286,9 +299,19 @@ class MemorySystem:
             self._save_topics()
 
     def _save_memories(self):
+        """保存记忆 — Outbox模式：先写outbox，成功后替换主文件，再删outbox"""
         data = [m.to_dict() for m in self.memories]
+        # Step 1: 写outbox（崩溃时可恢复）
+        with open(self.outbox_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        # Step 2: 替换主文件
         with open(self.memories_file, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+        # Step 3: 删outbox（主文件已安全）
+        try:
+            self.outbox_file.unlink()
+        except FileNotFoundError:
+            pass
 
     def save_session(self, history: List[Dict]):
         """保存当前对话历史"""
@@ -663,6 +686,8 @@ class MemorySystem:
         if cues is None and tags is None and self.llm:
             cues, tags = self.extract_cues_tags(content)
 
+        # ── 三重去重 ──────────────────────────────
+        # 1. 精确匹配（原有逻辑）：完全相同内容→触发+提升
         for m in self.memories:
             if m.content == content:
                 m.last_triggered = datetime.now().isoformat()
@@ -672,13 +697,65 @@ class MemorySystem:
                     for eid in entity_ids:
                         if eid not in m.entity_ids:
                             m.entity_ids.append(eid)
-                # P0.39: 补充cues/tags如果旧记忆缺失
                 if cues and not m.cues:
                     m.cues = cues
                 if tags and not m.tags:
                     m.tags = tags
                 self._save_memories()
                 return False  # 已存在
+
+        # 字符bigram集合（适用于中文，无分词器依赖）
+        def _bigrams(text):
+            text = text.lower().strip()
+            return {text[i:i+2] for i in range(len(text) - 1)} if len(text) > 1 else {text}
+
+        new_grams = _bigrams(content)
+
+        # 2. 语义去重：bigram重叠率>70%视为重复→触发旧记忆而非新增
+        if new_grams:
+            now = datetime.now()
+            for m in self.memories:
+                if m.should_archive():
+                    continue
+                old_grams = _bigrams(m.content)
+                if not old_grams:
+                    continue
+                overlap = len(new_grams & old_grams) / max(len(new_grams), len(old_grams))
+                if overlap > 0.7:
+                    # 语义重复：触发旧记忆而非新增
+                    m.last_triggered = now.isoformat()
+                    m.trigger_count += 1
+                    m.importance = max(m.importance, importance)
+                    # 不同维度→补充维度标记
+                    if dimension != m.dimension:
+                        if not hasattr(m, '_alt_dimensions'):
+                            m._alt_dimensions = []
+                        if dimension not in m._alt_dimensions:
+                            m._alt_dimensions.append(dimension)
+                    self._save_memories()
+                    return False
+
+        # 3. 时间去重：10分钟内有>50%相似度记忆→不新增
+        if new_grams:
+            now = datetime.now()
+            for m in self.memories:
+                try:
+                    m_time = datetime.fromisoformat(m.created_at)
+                except (ValueError, TypeError):
+                    continue
+                if (now - m_time).total_seconds() > 600:  # 10分钟
+                    continue
+                old_grams = _bigrams(m.content)
+                if not old_grams:
+                    continue
+                overlap = len(new_grams & old_grams) / max(len(new_grams), len(old_grams))
+                if overlap > 0.5:
+                    # 时间+语义双重近似：触发旧记忆
+                    m.last_triggered = now.isoformat()
+                    m.trigger_count += 1
+                    m.importance = max(m.importance, importance)
+                    self._save_memories()
+                    return False
 
         mem = Memory(content, category, importance, dimension=dimension,
                      entity_ids=entity_ids,
