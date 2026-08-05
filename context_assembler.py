@@ -24,7 +24,7 @@ class ContextAssembler:
                  arc_light_context: str = "", somatic_context: str = "",
                  feedback_hints: str = "", hexagram_context: str = "",
                  plugin_context: str = "", fleeting_moment_context: str = "",
-                 free_will_hint: str = ""):
+                 free_will_hint: str = "", skill_context: str = ""):
         self.system_prompt = system_prompt
         self.max_history = max_history
         self.memory_context = memory_context
@@ -36,6 +36,7 @@ class ContextAssembler:
         self.plugin_context = plugin_context
         self.fleeting_moment_context = fleeting_moment_context
         self.free_will_hint = free_will_hint
+        self.skill_context = skill_context
         self.history: List[Dict[str, str]] = []
 
     def set_memory_context(self, memory_context: str):
@@ -75,6 +76,10 @@ class ContextAssembler:
     def clear_free_will_hint(self):
         """清空自由意志提示"""
         self.free_will_hint = ""
+
+    def set_skill_context(self, skill_context: str):
+        """设置自进化技能上下文"""
+        self.skill_context = skill_context
 
     def add_user_message(self, content: str):
         self.history.append({"role": "user", "content": content})
@@ -170,6 +175,12 @@ class ContextAssembler:
             prompt += (
                 "\n\n---\n"
                 + self.free_will_hint
+            )
+
+        if self.skill_context:
+            prompt += (
+                "\n\n---\n"
+                + self.skill_context
             )
 
         return prompt
