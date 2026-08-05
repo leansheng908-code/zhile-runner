@@ -365,6 +365,8 @@ class CLI:
             self._handle_grow(parts)
         elif main_cmd == "/suggest":
             self._handle_suggest(parts)
+        elif main_cmd == "/destiny":
+            self._handle_destiny(parts)
         else:
             print(f"{Color.DIM}未知命令，输入 /help 查看可用命令{Color.RESET}")
 
@@ -3372,3 +3374,72 @@ class CLI:
             print(f"  {Color.DIM}意识帧: {psi_stats['consciousness_frame']}{Color.RESET}")
         print(f"\n  {Color.DIM}─────────────────────{Color.RESET}")
         print(f"  {Color.DIM}输入消息开始聊天，/help 查看命令{Color.RESET}")
+
+    def _handle_destiny(self, parts: list):
+        """处理 /destiny 命令 — 查看个人命格（大运/流年）"""
+        try:
+            from personal_destiny import PersonalDestiny
+        except ImportError:
+            print(f"{Color.DIM}personal_destiny 模块未安装{Color.RESET}")
+            return
+
+        cfg = self.core.config if self.core else {}
+        personal = cfg.get("personal", {})
+        if not personal.get("birth_year"):
+            print(f"{Color.DIM}未配置出生信息，请在 config.json 的 personal 段填写{Color.RESET}")
+            return
+
+        try:
+            pd = PersonalDestiny.from_config(cfg)
+        except Exception as e:
+            print(f"{Color.DIM}命格计算失败: {e}{Color.RESET}")
+            return
+
+        sub = parts[1] if len(parts) > 1 else "now"
+
+        if sub == "now":
+            destiny = pd.get_current_destiny()
+            print(f"{Color.CYAN}═══ 个人命格 ═══{Color.RESET}")
+            print(f"  日主: {Color.YELLOW}{destiny['day_master']}（{destiny['day_master_wuxing']}）{Color.RESET}"
+                  f"  格局: {destiny['geju']}")
+            print(f"  起运: {destiny['qiyun_age']}年  方向: {destiny['dayun_direction']}")
+            print()
+            print(f"{Color.CYAN}─── 当前大运（第{destiny['dayun_step']}步）───{Color.RESET}")
+            print(f"  干支: {Color.YELLOW}{destiny['dayun_ganzhi']}{Color.RESET}"
+                  f"  纳音: {destiny['dayun_nayin']}"
+                  f"  五行: {destiny['dayun_wuxing']}")
+            print(f"  十神: {destiny['dayun_shishen']}"
+                  f"  第{destiny['dayun_year_in_step']}年/共10年")
+            print()
+            print(f"{Color.CYAN}─── 当前流年 ───{Color.RESET}")
+            print(f"  干支: {Color.YELLOW}{destiny['liunian_ganzhi']}{Color.RESET}"
+                  f"  十神: {destiny['liunian_shishen']}")
+            print(f" 与大运关系: {destiny['liunian_dayun_relation']}")
+            print(f"\n  {Color.DIM}/destiny list — 查看全部大运序列{Color.RESET}")
+
+        elif sub == "list":
+            print(f"{Color.CYAN}═══ 大运序列（共{pd.dayun_count}步）═══{Color.RESET}")
+            print(f"  日主: {pd.day_master}（{pd.day_master_wuxing}）  格局: {pd.geju}")
+            print(f"  起运: {pd.qiyun_age}年  方向: {'顺' if pd.is_forward else '逆'}")
+            print()
+            from datetime import datetime as _dt
+            current_year = _dt.now().year
+            for i, dy in enumerate(pd._dayun_list):
+                gz = dy.getGanZhi()
+                start_age = dy.getStartAge()
+                start_year = dy.getStartYear()
+                end_year = dy.getEndYear()
+                end_age = dy.getEndAge()
+                nayin = ""
+                from personal_destiny import NAYIN_TABLE
+                nayin = NAYIN_TABLE.get(gz, "")
+                ss = ""
+                try:
+                    from personal_destiny import calc_shishen
+                    ss = calc_shishen(pd.day_gan, gz[0]) if gz else ""
+                except Exception:
+                    pass
+                marker = f" {Color.GREEN}◀ 当前{Color.RESET}" if start_year <= current_year <= end_year else ""
+                print(f"  第{i}步: {Color.YELLOW}{gz}{Color.RESET} ({nayin})"
+                      f"  {start_age}~{end_age}岁  {start_year}~{end_year}年"
+                      f"  十神:{ss}{marker}")
