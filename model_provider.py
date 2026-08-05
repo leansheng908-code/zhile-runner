@@ -503,20 +503,22 @@ class LLMProviderAdapter:
         self,
         messages: List[Dict[str, Any]],
         stream: bool = True,
+        **kwargs: Any,
     ) -> Generator[str, None, None]:
         """适配旧版 chat 接口（始终返回生成器）。
 
         Args:
             messages: 消息列表。
             stream: 是否流式（适配器中始终以生成器方式返回）。
+            **kwargs: 额外参数（如 max_tokens 覆盖），透传给 Provider。
 
         Yields:
             文本片段。
         """
         if stream:
-            yield from self._provider.chat(messages, stream=True)  # type: ignore
+            yield from self._provider.chat(messages, stream=True, **kwargs)  # type: ignore
         else:
-            result = self._provider.chat(messages, stream=False)
+            result = self._provider.chat(messages, stream=False, **kwargs)
             if isinstance(result, str):
                 yield result
 
@@ -543,6 +545,52 @@ class LLMProviderAdapter:
             元组 (success, message)。
         """
         return self._provider.test_connection()
+
+    # ─── 兼容属性 ──────────────────────────────────────────
+
+    @property
+    def model(self) -> str:
+        """模型名称（兼容旧 LLMProvider.model）。"""
+        return self._provider.model
+
+    @property
+    def base_url(self) -> str:
+        """API Base URL（兼容旧 LLMProvider.base_url）。"""
+        return self._provider.base_url
+
+    @property
+    def api_key(self) -> str:
+        """API Key（兼容旧 LLMProvider.api_key）。"""
+        return self._provider.api_key
+
+    @property
+    def temperature(self) -> float:
+        """采样温度（兼容旧 LLMProvider.temperature）。"""
+        return self._provider.temperature
+
+    @property
+    def max_tokens(self) -> int:
+        """最大 token 数（兼容旧 LLMProvider.max_tokens）。"""
+        return self._provider.max_tokens
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        """配置字典（兼容 /provider 命令访问）。
+
+        Returns:
+            包含 provider/model/base_url/temperature/max_tokens 等键的字典。
+        """
+        provider_name = self._provider.__class__.__name__.replace("Provider", "").lower()
+        return {
+            "provider": provider_name,
+            "model": self._provider.model,
+            "base_url": self._provider.base_url,
+            "temperature": self._provider.temperature,
+            "max_tokens": self._provider.max_tokens,
+            "top_p": self._provider.top_p,
+            "frequency_penalty": self._provider.frequency_penalty,
+            "presence_penalty": self._provider.presence_penalty,
+        }
 
     @property
     def provider(self) -> ModelProvider:
