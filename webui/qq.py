@@ -12,12 +12,13 @@ NapCat以反向WebSocket方式连接到本适配器（与AstrBot相同的接入�
 
 import asyncio
 import json
+import random
 import re
 import time
 import websockets
 from datetime import datetime
 
-from core import ZhileCore
+from core import ZhileCore, quality_strip
 
 
 class QQAdapter:
@@ -32,6 +33,7 @@ class QQAdapter:
         self.self_id = None  # 机器人QQ号
         self._last_proactive_time = None
         self._last_news_date = {}  # P0.33: 记录每天每个时段已推送的新闻 {window_key: "YYYY-MM-DD"}
+        self._debounce_tasks = {}  # 消息防抖定时器
 
     # ─── WS连接 ───────────────────────────────
 
@@ -103,15 +105,12 @@ class QQAdapter:
                     await self._send_group(group_id, reply)
             return
 
-        # ─── 私聊 ───
+        # ─── 私聊（防抖+拆分流式） ───
         if msg_type == "private":
             print(f"  📨 私聊 {user_id}: {raw_msg[:40]}")
-            reply = self.core.chat_sync(raw_msg)
-            await self._send_private(user_id, reply)
-            # P0.3: 自动成长扫描
-            self.core.maybe_auto_scan()
+            await self._debounce_private(user_id, raw_msg)
 
-        # ─── 群聊（@时回复） ───
+        # ─── 群聊（@时回复，防抖+拆分流式） ───
         elif msg_type == "group":
             if not self._check_at_me(data):
                 return
@@ -119,10 +118,7 @@ class QQAdapter:
             if not msg.strip():
                 return
             print(f"  📨 群{group_id} @{user_id}: {msg[:40]}")
-            reply = self.core.chat_sync(msg)
-            await self._send_group(group_id, reply, at_user=user_id)
-            # P0.3: 自动成长扫描
-            self.core.maybe_auto_scan()
+            await self._debounce_group(group_id, user_id, msg)
 
     # ─── @检测 ────────────────────────────────
 
@@ -141,6 +137,66 @@ class QQAdapter:
     def _strip_at(self, text: str) -> str:
         """去掉@CQ码，只留文本"""
         return re.sub(r'\[CQ:at,qq=\d+\]', '', text).strip()
+
+    # ─── 消息防抖+拆分流式 ─────────────────────
+
+    async def _debounce_private(self, user_id: int, message: str):
+        """私聊防抖：等1.2秒合并连发消息，再处理"""
+        sk = f"private_{user_id}"
+        self.core.debounce_add(sk, message)
+        self.core.check_serious_mode(message)
+        old = self._debounce_tasks.pop(sk, None)
+        if old and not old.done():
+            old.cancel()
+        self._debounce_tasks[sk] = asyncio.create_task(
+            self._flush_private(sk, user_id))
+
+    async def _debounce_group(self, group_id: int, user_id: int, message: str):
+        """群聊防抖"""
+        sk = f"group_{group_id}_{user_id}"
+        self.core.debounce_add(sk, message)
+        self.core.check_serious_mode(message)
+        old = self._debounce_tasks.pop(sk, None)
+        if old and not old.done():
+            old.cancel()
+        self._debounce_tasks[sk] = asyncio.create_task(
+            self._flush_group(sk, group_id, user_id))
+
+    async def _flush_private(self, sk: str, user_id: int):
+        """防抖超时后处理私聊消息"""
+        try:
+            await asyncio.sleep(self.core._debounce_seconds)
+        except asyncio.CancelledError:
+            return
+        merged = self.core.debounce_flush(sk)
+        if not merged:
+            return
+        reply = self.core.chat_sync(merged)
+        parts = self.core.split_message(reply)
+        for i, part in enumerate(parts):
+            await self._send_private(user_id, part)
+            if i < len(parts) - 1:
+                await asyncio.sleep(random.uniform(
+                    self.core._split_min_delay, self.core._split_max_delay))
+        self.core.maybe_auto_scan()
+
+    async def _flush_group(self, sk: str, group_id: int, user_id: int):
+        """防抖超时后处理群聊消息"""
+        try:
+            await asyncio.sleep(self.core._debounce_seconds)
+        except asyncio.CancelledError:
+            return
+        merged = self.core.debounce_flush(sk)
+        if not merged:
+            return
+        reply = self.core.chat_sync(merged)
+        parts = self.core.split_message(reply)
+        for i, part in enumerate(parts):
+            await self._send_group(group_id, part, at_user=user_id)
+            if i < len(parts) - 1:
+                await asyncio.sleep(random.uniform(
+                    self.core._split_min_delay, self.core._split_max_delay))
+        self.core.maybe_auto_scan()
 
     # ─── 命令 ─────────────────────────────────
 
