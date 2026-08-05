@@ -1448,7 +1448,88 @@ class CLI:
         """处理 /skill 命令 — 技能自学习系统"""
         sub = parts[1] if len(parts) > 1 else "status"
 
-        if sub == "status":
+        if sub == "list":
+            skills = self.core.skill_list()
+            if not skills:
+                print(f"{Color.DIM}  暂无已注册技能{Color.RESET}")
+            else:
+                print(f"{Color.DIM}─── 技能列表 ───{Color.RESET}")
+                for s in skills:
+                    tier_color = {"manual": Color.CYAN, "auto": Color.GREEN, "composite": Color.YELLOW}.get(s["tier"], Color.RESET)
+                    state_str = ""
+                    if s.get("t1_state"):
+                        state_str = f" [{s['t1_state']}]"
+                        if s["t1_state"] == "cooling":
+                            state_str += f"({s.get('cooling_rounds', 0)}/10)"
+                    disabled_str = f" {Color.RED}[禁用]{Color.RESET}" if s.get("disabled") else ""
+                    flag_str = f" {Color.YELLOW}⚠低效{Color.RESET}" if s.get("flagged") else ""
+                    print(f"  {tier_color}{s['name']}{Color.RESET} {Color.DIM}({s['tier_label']}){Color.RESET}{state_str}{disabled_str}{flag_str}")
+                    print(f"    {Color.DIM}使用:{s['usage']} 成功率:{s['success_rate']:.0%}{Color.RESET}")
+                print(f"\n  {Color.DIM}共 {len(skills)} 个技能{Color.RESET}")
+
+        elif sub == "info":
+            if len(parts) < 3:
+                print(f"{Color.DIM}用法: /skill info <技能名>{Color.RESET}")
+            else:
+                name = parts[2]
+                info = self.core.skill_info(name)
+                if info.get("error"):
+                    print(f"{Color.RED}❌ {info['error']}{Color.RESET}")
+                else:
+                    print(f"{Color.DIM}─── 技能详情 ───{Color.RESET}")
+                    print(f"  名称: {Color.CYAN}{info['name']}{Color.RESET}")
+                    print(f"  层级: {info['tier_label']}")
+                    if info.get("keywords"):
+                        print(f"  关键词: {', '.join(info['keywords'])}")
+                    if info.get("category"):
+                        print(f"  类别: {info['category']}")
+                    if info.get("trigger_examples"):
+                        print(f"  触发示例: {', '.join(info['trigger_examples'][:3])}")
+                    if info.get("parents"):
+                        print(f"  父技能: {', '.join(info['parents'])}")
+                    print(f"  使用次数: {info['usage']}")
+                    print(f"  成功率: {info['success_rate']:.0%}")
+                    if info.get("t1_state"):
+                        print(f"  T1状态: {info['t1_state']}" + (f"（冷却{info.get('cooling_rounds', 0)}轮）" if info['t1_state'] == 'cooling' else ""))
+                    if info.get("disabled"):
+                        print(f"  {Color.RED}[已禁用]{Color.RESET}")
+                    if info.get("flagged"):
+                        print(f"  {Color.YELLOW}⚠ 标记为低效，待重生成{Color.RESET}")
+                    if info.get("content_preview"):
+                        print(f"\n  {Color.DIM}── 内容预览 ──{Color.RESET}")
+                        print(f"  {Color.DIM}{info['content_preview']}{Color.RESET}")
+
+        elif sub == "disable":
+            if len(parts) < 3:
+                print(f"{Color.DIM}用法: /skill disable <技能名>{Color.RESET}")
+            else:
+                result = self.core.skill_disable(parts[2])
+                if result.get("success"):
+                    print(f"{Color.GREEN}✅ {result['message']}{Color.RESET}")
+                else:
+                    print(f"{Color.RED}❌ {result['message']}{Color.RESET}")
+
+        elif sub == "enable":
+            if len(parts) < 3:
+                print(f"{Color.DIM}用法: /skill enable <技能名>{Color.RESET}")
+            else:
+                result = self.core.skill_enable(parts[2])
+                if result.get("success"):
+                    print(f"{Color.GREEN}✅ {result['message']}{Color.RESET}")
+                else:
+                    print(f"{Color.RED}❌ {result['message']}{Color.RESET}")
+
+        elif sub == "remove":
+            if len(parts) < 3:
+                print(f"{Color.DIM}用法: /skill remove <技能名>{Color.RESET}")
+            else:
+                result = self.core.skill_remove(parts[2])
+                if result.get("success"):
+                    print(f"{Color.GREEN}✅ {result['message']}{Color.RESET}")
+                else:
+                    print(f"{Color.RED}❌ {result['message']}{Color.RESET}")
+
+        elif sub == "status":
             eval_status = self.core.skill_eval_status()
             learn_status = self.core.skill_learn_status()
 
@@ -1515,6 +1596,7 @@ class CLI:
                         print(f"  ✅ {rule.get('name', '?')}: {rule.get('description', '')[:60]}")
 
         else:
+            print(f"  {Color.DIM}/skill list | /skill info <名> | /skill disable <名> | /skill enable <名> | /skill remove <名>{Color.RESET}")
             print(f"  {Color.DIM}/skill status | /skill eval | /skill learn{Color.RESET}")
 
     def _handle_publish(self, parts):
@@ -2598,6 +2680,11 @@ class CLI:
         print(f"  {Color.CYAN}/topic gen{Color.RESET}          生成话题")
         print(f"  {Color.CYAN}/topic next{Color.RESET}         取下一条")
         print(f"  {Color.CYAN}/topic peek{Color.RESET}         预览话题")
+        print(f"  {Color.CYAN}/skill list{Color.RESET}          技能列表")
+        print(f"  {Color.CYAN}/skill info <名>{Color.RESET}     技能详情")
+        print(f"  {Color.CYAN}/skill disable <名>{Color.RESET}  禁用技能")
+        print(f"  {Color.CYAN}/skill enable <名>{Color.RESET}   启用技能")
+        print(f"  {Color.CYAN}/skill remove <名>{Color.RESET}   删除T2/T3技能")
         print(f"  {Color.CYAN}/skill{Color.RESET}              技能自学习")
         print(f"  {Color.CYAN}/skill eval{Color.RESET}         评估回复")
         print(f"  {Color.CYAN}/skill learn{Color.RESET}        自学习循环")
