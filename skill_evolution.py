@@ -447,12 +447,20 @@ class SkillEvolution:
         """检查技能是否有关键词或触发示例命中（强信号）。
 
         用于场景结束时判断技能是否「绝对用不上」。
-        仅看强信号（关键词+触发示例），不看类别等弱信号。
+        仅看强信号（关键词+触发示例+正则），不看类别等弱信号。
         """
         if not user_message:
             return False
         metadata = info.get("metadata", {})
         msg_lower = user_message.lower()
+
+        # P0.54: 正则预匹配（最高优先级，一次匹配即可确定）
+        for pattern in metadata.get("regex_patterns", []):
+            try:
+                if re.search(pattern, user_message, re.IGNORECASE):
+                    return True
+            except re.error:
+                pass  # 无效正则跳过
 
         # 关键词命中
         for kw in metadata.get("keywords", []):
@@ -679,6 +687,15 @@ class SkillEvolution:
         for kw in keywords:
             if len(kw) >= 2 and kw.lower() in msg_lower:
                 score += WEIGHT_KEYWORD
+
+        # P0.54: 信号1.5 — 正则预匹配 (权重=关键词×1.5，最强信号)
+        for pattern in metadata.get("regex_patterns", []):
+            try:
+                if re.search(pattern, user_message, re.IGNORECASE):
+                    score += WEIGHT_KEYWORD * 1.5
+                    break  # 命中一个即可
+            except re.error:
+                pass
 
         # 信号2: 触发示例重叠 (×2)
         trigger_examples = metadata.get("trigger_examples", [])
