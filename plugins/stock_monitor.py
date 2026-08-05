@@ -354,3 +354,24 @@ class StockMonitorPlugin(BackgroundPlugin):
     def _get_watch_list(self):
         cfg = _load_config()
         return cfg.get("watch_list", [])
+
+    # ─── P0.56: 能力暴露 ──────────────────────────
+
+    def get_capabilities(self) -> dict:
+        """暴露股价查询能力给Skills系统"""
+        return {
+            "name": "stock_query",
+            "description": "实时股价查询（哈药股份/山东高速/北京银行）",
+            "triggers": ["股价", "股票", "行情", "哈药", "山东高速", "北京银行",
+                         "盯盘", "涨了", "跌了", "多少钱"],
+            "plugin": "stock_monitor",
+            "method": "query_report",
+            "category": "finance",
+        }
+
+    def query_report(self) -> str:
+        """返回格式化的股票行情报告（供对话调用）"""
+        try:
+            return format_report()
+        except Exception as e:
+            return f"（股价查询失败: {e}）"
