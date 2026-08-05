@@ -445,6 +445,12 @@ class ZhileCore:
         # P0.46③: 自然语言Cron调度
         nls_config = self.config.get("nl_scheduler", {})
         self.nl_scheduler = NaturalLanguageScheduler(config=nls_config) if nls_config.get("enabled", True) else None
+        if self.nl_scheduler:
+            # 设置默认回调并加载持久化任务
+            def _nl_default_callback():
+                pass  # CLI模式下由cli.py创建时绑定的callback处理；此默认回调仅用于恢复存档任务
+            self.nl_scheduler.set_default_callback(_nl_default_callback)
+            self.nl_scheduler.load_tasks()
 
         # P0.35 Phase 1: 后台插件管理器
         bgp_config = self.config.get("background_plugins", {})
