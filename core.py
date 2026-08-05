@@ -98,6 +98,32 @@ except ImportError:
     _HEXAGRAM_AVAILABLE = False
 
 
+def quality_strip(text: str) -> str:
+    """轻量正则扫描 — 删除常见AI味短语（质量护栏Lite）。
+    纯regex处理，不走LLM重写，成本几乎为零。在回复发送前调用。"""
+    import re as _re
+    _blacklist = [
+        r'作为(?:一个)?AI(?:助手|语言模型)?[，,。]?',
+        r'我理解(?:你的|您)?(?:感受|心情|想法)[，,。]?',
+        r'有什么可以帮(?:到你|你|您)?[的吗？?]?',
+        r'总的来说[，,]?', r'综上所述[，,]?', r'需要注意的是[，,]?',
+        r'值得一提的是[，,]?', r'希望(?:这|对你)?(?:能)?帮(?:助|到)你[。.]?',
+        r'作为(?:一个)?AI[，,]?', r'我无法[，,]?', r'不过我可以[，,]?',
+        r'让我来帮(?:你)?[，,]?', r'你可以尝试[，,]?', r'建议你[，,]?',
+        r'除此之外[，,]?', r'另一方面[，,]?', r'与此同时[，,]?',
+        r'总而言之[，,]?', r'由此可见[，,]?', r'众所周知[，,]?',
+        r'显而易见[，,]?', r'在此过程中[，,]?',
+        r'从某种程度(?:上)?(?:来说)?[，,]?', r'在某种意义(?:上)?(?:来说)?[，,]?',
+    ]
+    for p in _blacklist:
+        text = _re.sub(p, '', text)
+    text = _re.sub(r'[，,]\s*[，,]', '，', text)
+    text = _re.sub(r'[。.]\s*[。.]', '。', text)
+    text = _re.sub(r'\s{2,}', ' ', text)
+    text = _re.sub(r'^[，,\s。]+|[，,\s。]+$', '', text)
+    return text
+
+
 class ZhileCore:
     """知乐运行器核心 — 所有平台共享的对话引擎"""
 
@@ -519,6 +545,70 @@ class ZhileCore:
             print(f"⚠ [Core] ApprovalGate 初始化失败，降级跳过: {e}")
             self.approval_gate = None
 
+        # ─── UX: 消息防抖/拆分/严肃模式 ─────────
+        self.serious_mode_until = 0
+        self._serious_seconds = self.config.get("serious_mode_seconds", 1200)
+        self._serious_triggers = self.config.get("serious_mode_triggers",
+            ["认真点", "说中文", "正经点", "严肃", "别玩了"])
+        self._debounce_buffers = {}
+        self._debounce_seconds = self.config.get("message_debounce_seconds", 1.2)
+        self._split_max_chars = self.config.get("message_split_max_chars", 44)
+        self._split_max_parts = self.config.get("message_split_max_parts", 4)
+        self._split_min_delay = self.config.get("message_split_min_delay", 0.55)
+        self._split_max_delay = self.config.get("message_split_max_delay", 1.35)
+
+    def check_serious_mode(self, message: str) -> bool:
+        """检查是否触发严肃模式"""
+        for t in self._serious_triggers:
+            if t in message:
+                self.serious_mode_until = time.time() + self._serious_seconds
+                return True
+        return False
+
+    def _serious_suffix(self) -> str:
+        """严肃模式激活时返回提示文本"""
+        if time.time() < self.serious_mode_until:
+            return "[严肃模式] 用户要求严肃对话，减少撒娇和颜文字，语气更直接"
+        return ""
+
+    def debounce_add(self, session_key: str, message: str):
+        """添加消息到防抖缓冲区"""
+        if session_key not in self._debounce_buffers:
+            self._debounce_buffers[session_key] = []
+        self._debounce_buffers[session_key].append(message)
+
+    def debounce_flush(self, session_key: str) -> str:
+        """取出并清空缓冲区消息"""
+        msgs = self._debounce_buffers.pop(session_key, [])
+        return "\n".join(msgs) if msgs else ""
+
+    def split_message(self, text: str) -> list:
+        """将回复拆分为多段（QQ流式发送用）"""
+        import re as _re
+        if not text or not text.strip():
+            return [text] if text else []
+        mx = self._split_max_chars
+        # 压缩空白 → 按标点切句 → 硬换行 → 合并短句 → 截断
+        text = _re.sub(r'[ \t]+', ' ', text).strip()
+        sentences = _re.split(r'(?<=[。！？；\n])', text)
+        sentences = [s.strip() for s in sentences if s.strip()]
+        broken = []
+        for s in sentences:
+            while len(s) > mx:
+                broken.append(s[:mx]); s = s[mx:]
+            if s:
+                broken.append(s)
+        merged = []
+        for s in broken:
+            if merged and len(merged[-1]) + len(s) <= mx:
+                merged[-1] += s
+            else:
+                merged.append(s)
+        if len(merged) > self._split_max_parts:
+            last = "".join(merged[self._split_max_parts - 1:])
+            merged = merged[:self._split_max_parts - 1] + [last]
+        return merged if merged else [text]
+
     @staticmethod
     def _load_config(config_path: str) -> dict:
         path = Path(config_path)
@@ -774,6 +864,11 @@ class ZhileCore:
             )
         }
         messages = [proactive_hint] + messages
+
+        # 严肃模式注入
+        _serious = self._serious_suffix()
+        if _serious:
+            messages = [{"role": "system", "content": _serious}] + messages
 
         # P0.60: 叙述事件 — 思考中（桌宠歪头）
         self.narration.emit_thinking()
@@ -1036,8 +1131,8 @@ class ZhileCore:
                 pass
 
     def chat_sync(self, message: str) -> str:
-        """非流式对话，返回完整回复"""
-        return "".join(self.chat(message))
+        """非流式对话，返回完整回复（含质量护栏strip）"""
+        return quality_strip("".join(self.chat(message)))
 
     # ─── 状态 ─────────────────────────────────
 
