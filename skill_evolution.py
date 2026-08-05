@@ -893,7 +893,9 @@ class SkillEvolution:
             self.skills_dir / TIER_DIRS["manual"] / f"{skill_name}.md",
         ]
         if skill_name in self.skills_registry:
-            candidates.insert(0, Path(self.skills_registry[skill_name]["file"]))
+            reg_file = self.skills_registry[skill_name].get("file")
+            if reg_file:
+                candidates.insert(0, Path(reg_file))
         for path in candidates:
             if path.exists():
                 return path
