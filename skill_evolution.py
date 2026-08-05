@@ -611,6 +611,9 @@ class SkillEvolution:
             info = self.skills_registry.get(name)
             if not info:
                 continue
+            # P0.56: 跳过插件虚拟技能（无文件，数据由core.py实时注入）
+            if info.get("tier") == "plugin" or not info.get("file"):
+                continue
             skill_path = Path(info["file"])
             if not skill_path.exists():
                 continue
@@ -636,6 +639,9 @@ class SkillEvolution:
         parts: List[str] = ["", "## 已积累的技能经验", ""]
         loaded: List[str] = []
         for name, info in registry.items():
+            # P0.56: 跳过插件虚拟技能（无文件，数据由core.py实时注入）
+            if info.get("tier") == "plugin" or not info.get("file"):
+                continue
             skill_path = Path(info["file"])
             if not skill_path.exists():
                 continue
@@ -739,7 +745,13 @@ class SkillEvolution:
 
     def _load_skills_internal(self) -> None:
         """扫描三层目录 + 根目录（兼容旧技能），更新注册表。"""
+        # P0.56: 保留 plugin 层虚拟技能（无文件，不重新扫描）
+        plugin_skills = {
+            n: i for n, i in self.skills_registry.items()
+            if i.get("tier") == "plugin"
+        }
         self.skills_registry.clear()
+        self.skills_registry.update(plugin_skills)
 
         # 扫描三层子目录
         for tier, subdir in TIER_DIRS.items():
@@ -810,6 +822,9 @@ class SkillEvolution:
         self._save_metadata(skill_name, metadata, tier)
 
         # 追加评估日志到技能文件
+        # P0.56: 插件虚拟技能无文件，跳过
+        if not info.get("file"):
+            return
         skill_path = Path(info["file"])
         if skill_path.exists():
             try:
@@ -1304,7 +1319,7 @@ class SkillEvolution:
             result.append({
                 "name": name,
                 "tier": tier,
-                "tier_label": {"manual": "T1手动", "auto": "T2自进化", "composite": "T3组合"}.get(tier, tier),
+                "tier_label": {"manual": "T1手动", "auto": "T2自进化", "composite": "T3组合", "plugin": "插件能力"}.get(tier, tier),
                 "keywords": info.get("metadata", {}).get("keywords", []),
                 "category": info.get("metadata", {}).get("category", ""),
                 "usage": info.get("usage_count", 0),
@@ -1399,3 +1414,51 @@ class SkillEvolution:
         # 重新加载注册表
         self._load_skills_internal()
         return True, f"已删除技能 '{skill_name}'（{len(deleted_files)}个文件）"
+
+    # ─── P0.56: 插件能力注册 ──────────────────────────────
+
+    def register_plugin_skills(self, capabilities: list) -> int:
+        """将插件能力注册为虚拟技能，使其在 /skill list 中可见。
+
+        插件技能特点：
+        - tier = "plugin"（独立于T1/T2/T3文件技能）
+        - 无文件（file=None），不参与自动生成/重生成/组合
+        - 数据由 core.py._check_plugin_capabilities() 实时获取并注入
+        - 不参与打分筛选（由触发词直接匹配，在core.py中处理）
+
+        Args:
+            capabilities: 插件能力描述符列表（来自 PluginManager.get_all_capabilities()）
+
+        Returns:
+            int: 注册的插件技能数量
+        """
+        if not capabilities:
+            return 0
+
+        count = 0
+        for cap in capabilities:
+            name = f"plugin_{cap.get('plugin', '')}_{cap.get('name', 'unknown')}"
+            self.skills_registry[name] = {
+                "file": None,  # 虚拟技能，无文件
+                "tier": "plugin",
+                "created": datetime.now().isoformat(),
+                "usage_count": 0,
+                "success_count": 0,
+                "fail_count": 0,
+                "metadata": {
+                    "keywords": cap.get("triggers", []),
+                    "trigger_examples": [],
+                    "category": cap.get("category", "plugin"),
+                    "description": cap.get("description", ""),
+                    "plugin": cap.get("plugin", ""),
+                    "method": cap.get("method", ""),
+                    "novelty_boost_remaining": 0,
+                    "zero_use_rounds": 0,
+                    "flagged_for_regen": False,
+                },
+            }
+            count += 1
+
+        if count:
+            print(f"  🔗 P0.56: 已注册 {count} 个插件技能到技能注册表")
+        return count
