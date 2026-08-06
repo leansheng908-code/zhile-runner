@@ -495,6 +495,20 @@ class ZhileCore:
         self.web_search_max_rounds = ws_config.get("max_rounds", 3)
         self.web_search_num_results = ws_config.get("num_results", 5)
 
+        # P0.79: PSI驱动的个性化内容发现引擎
+        try:
+            from content_discovery import InterestProfiler, PSIContentMapper, ContentDiscoveryEngine
+            profile_path = os.path.join(self.base_dir, "user_interest_profile.json")
+            self.interest_profiler = InterestProfiler(profile_path=profile_path)
+            self.psi_content_mapper = PSIContentMapper()
+            self.content_discovery = ContentDiscoveryEngine(
+                self.interest_profiler, self.psi_content_mapper
+            )
+        except ImportError:
+            self.interest_profiler = None
+            self.psi_content_mapper = None
+            self.content_discovery = None
+
         # P0.37: 通道无关后台任务管理器
         self.background = BackgroundTaskManager(self)
 
@@ -727,6 +741,21 @@ class ZhileCore:
         if self.psi:
             self.psi.on_user_message(message)
             self.ctx.set_psi_context(self.psi.get_context())
+
+        # P0.79: 从用户消息中提取兴趣信号 + 注入PSI内容推荐感知
+        if self.content_discovery:
+            self.content_discovery.process_chat(message)
+            if self.psi:
+                psi_state = {
+                    "belonging": getattr(self.psi, 'belonging', 3.0),
+                    "energy": getattr(self.psi, 'energy', 3.0),
+                    "certainty": getattr(self.psi, 'certainty', 3.0),
+                    "competence": getattr(self.psi, 'competence', 3.0),
+                    "autonomy": getattr(self.psi, 'autonomy', 3.0),
+                }
+                annotation = self.psi_content_mapper.get_annotation(psi_state)
+                if annotation:
+                    self.ctx.set_content_discovery_hint(annotation)
 
         # P0.74: 思维-表达间隙 — 三层管线处理
         if self.desire_engine:
@@ -1620,7 +1649,7 @@ class ZhileCore:
     # ─── P0.33: 联网搜索 + 新闻推送 ───────────
 
     def search_and_format_news(self) -> Optional[str]:
-        """搜索新闻并用LLM格式化为简短播报"""
+        """搜索新闻并用LLM格式化为简短播报（P0.79: PSI+画像驱动关键词）"""
         if not self.web_searcher:
             return None
         try:
@@ -1629,13 +1658,34 @@ class ZhileCore:
             num_per_topic = news_config.get("max_results_per_topic", 3)
             user_prefs = news_config.get("user_prefs", "")
 
+            # P0.79: 如果内容发现引擎可用，用PSI+画像驱动搜索关键词
+            psi_annotation = ""
+            if self.content_discovery and self.psi:
+                psi_state = {
+                    "belonging": getattr(self.psi, 'belonging', 3.0),
+                    "energy": getattr(self.psi, 'energy', 3.0),
+                    "certainty": getattr(self.psi, 'certainty', 3.0),
+                    "competence": getattr(self.psi, 'competence', 3.0),
+                    "autonomy": getattr(self.psi, 'autonomy', 3.0),
+                }
+                discovery = self.content_discovery.discover(psi_state, max_keywords=3)
+                if discovery["keywords"]:
+                    # 将画像驱动的关键词与默认topics合并（去重）
+                    merged = list(dict.fromkeys(discovery["keywords"] + topics))
+                    topics = merged[:6]  # 最多6个topic
+                psi_annotation = discovery.get("annotation", "")
+
             # 搜索
             results = self.web_searcher.search_news(topics, num_per_topic)
             if not results:
                 return None
 
-            # LLM筛选格式化
-            brief = self.web_searcher.format_news_brief(results, self.llm, user_prefs)
+            # LLM筛选格式化（附加PSI推荐理由）
+            enhanced_prefs = user_prefs
+            if psi_annotation:
+                enhanced_prefs = f"{user_prefs}\n推荐理由感知: {psi_annotation}".strip()
+
+            brief = self.web_searcher.format_news_brief(results, self.llm, enhanced_prefs)
             return brief
         except Exception as e:
             import sys
