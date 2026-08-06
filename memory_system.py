@@ -246,13 +246,102 @@ class MemorySystem:
         except (json.JSONDecodeError, TypeError):
             return []
 
+    # ─── 垃圾对话过滤（P0.69深睡眠前置） ──────────────────────
+
+    _META_PATTERNS = {
+        "再试一下", "再试一次", "再试试", "再试", "再来一次", "再来",
+        "试试", "试一下", "测试", "test", "123",
+        "嗯", "嗯嗯", "好的", "好吧", "哦", "啊", "呢",
+        "继续", "接着", "然后呢", "可以吗",
+    }
+
+    _FAILURE_KEYWORDS = [
+        "搜索失败", "出错了", "抱歉", "无法", "错误", "失败", "报错",
+        "没能", "没有成功", "出问题", "异常", "抓取失败", "不支持",
+    ]
+
+    @classmethod
+    def _is_garbage_exchange(cls, history: List[Dict], idx: int) -> bool:
+        """判断 idx 位置的用户消息+紧跟的助手回复是否为垃圾交互"""
+        if idx >= len(history):
+            return False
+        msg = history[idx]
+        if msg.get("role") != "user":
+            return False
+        content = (msg.get("content") or "").strip()
+
+        # 空消息 = 垃圾
+        if not content:
+            return True
+
+        is_meta = content in cls._META_PATTERNS or content.startswith("再试")
+        is_short = len(content) < 6
+
+        # 获取助手回复
+        asst_content = ""
+        if idx + 1 < len(history) and history[idx + 1].get("role") == "assistant":
+            asst_content = (history[idx + 1].get("content") or "")
+
+        has_failure = any(kw in asst_content for kw in cls._FAILURE_KEYWORDS)
+
+        # 垃圾判定：
+        # 1. meta短语 + 失败回复 → 100%垃圾
+        if is_meta and has_failure:
+            return True
+        # 2. 超短(<4字) + 失败回复 → 垃圾
+        if len(content) < 4 and has_failure:
+            return True
+        # 3. meta短语 + 超短回复(<20字) → 低价值，清掉
+        if is_meta and len(asst_content) < 20:
+            return True
+        # 4. 纯标点/语气词(<3字且无实质内容)
+        if len(content) < 3 and not any(c.isalnum() for c in content):
+            return True
+
+        return False
+
+    @classmethod
+    def _filter_garbage(cls, history: List[Dict]) -> tuple:
+        """过滤垃圾交互，返回 (过滤后历史, 剔除数量)"""
+        filtered = []
+        removed = 0
+        i = 0
+        while i < len(history):
+            msg = history[i]
+            if msg.get("role") == "user" and cls._is_garbage_exchange(history, i):
+                # 跳过 user + 紧跟的 assistant
+                skip = 1
+                if i + 1 < len(history) and history[i + 1].get("role") == "assistant":
+                    skip = 2
+                removed += skip
+                i += skip
+                continue
+            filtered.append(msg)
+            i += 1
+        return filtered, removed
+
     def _load_session(self) -> List[Dict]:
         if not self.session_file.exists():
             return []
         try:
             with open(self.session_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            return data.get("messages", [])[-60:]
+            messages = data.get("messages", [])
+
+            # P0.69: Session TTL — 超过24小时的session不恢复
+            saved_at = data.get("saved_at", "")
+            if saved_at:
+                try:
+                    saved_time = datetime.fromisoformat(saved_at)
+                    age_hours = (datetime.now() - saved_time).total_seconds() / 3600
+                    if age_hours > 24:
+                        return []
+                except (ValueError, TypeError):
+                    pass
+
+            # 过滤垃圾 + 截取最近60条
+            messages, _ = self._filter_garbage(messages)
+            return messages[-60:]
         except (json.JSONDecodeError, TypeError):
             return []
 
@@ -327,10 +416,13 @@ class MemorySystem:
             pass
 
     def save_session(self, history: List[Dict]):
-        """保存当前对话历史"""
+        """保存当前对话历史（保存前过滤垃圾交互）"""
+        filtered, removed = self._filter_garbage(history)
+        if removed > 0:
+            print(f"  [Session] 过滤 {removed} 条垃圾消息")
         data = {
             "saved_at": datetime.now().isoformat(),
-            "messages": history,
+            "messages": filtered[-60:],
         }
         with open(self.session_file, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -338,6 +430,57 @@ class MemorySystem:
     def restore_session(self) -> List[Dict]:
         """恢复上次对话历史"""
         return self.session_history
+
+    def cleanup_session(self) -> dict:
+        """
+        P0.69 深睡眠·做梦：清理session.json中的垃圾对话
+        由dream_scheduler在深睡眠状态下调用
+        返回清理统计
+        """
+        if not self.session_file.exists():
+            return {"cleaned": False, "reason": "no_session_file", "removed": 0}
+
+        try:
+            with open(self.session_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, TypeError):
+            return {"cleaned": False, "reason": "parse_error", "removed": 0}
+
+        messages = data.get("messages", [])
+        original_count = len(messages)
+
+        # 过滤垃圾
+        filtered, removed = self._filter_garbage(messages)
+
+        # TTL检查：超过24小时直接清空
+        saved_at = data.get("saved_at", "")
+        ttl_expired = False
+        if saved_at:
+            try:
+                saved_time = datetime.fromisoformat(saved_at)
+                age_hours = (datetime.now() - saved_time).total_seconds() / 3600
+                if age_hours > 24:
+                    filtered = []
+                    removed = original_count
+                    ttl_expired = True
+            except (ValueError, TypeError):
+                pass
+
+        if removed > 0:
+            data["messages"] = filtered[-60:]
+            data["last_cleanup"] = datetime.now().isoformat()
+            with open(self.session_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            # 同步更新内存中的session_history
+            self.session_history = filtered[-60:]
+
+        return {
+            "cleaned": removed > 0,
+            "removed": removed,
+            "original_count": original_count,
+            "remaining": len(filtered[-60:]),
+            "ttl_expired": ttl_expired,
+        }
 
     # ─── 记忆注入 ─────────────────────────────
 
