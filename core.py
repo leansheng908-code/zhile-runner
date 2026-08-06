@@ -506,7 +506,7 @@ class ZhileCore:
         # P0.79: PSI驱动的个性化内容发现引擎
         try:
             from content_discovery import InterestProfiler, PSIContentMapper, ContentDiscoveryEngine
-            profile_path = os.path.join(self.base_dir, "user_interest_profile.json")
+            profile_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "user_interest_profile.json")
             self.interest_profiler = InterestProfiler(profile_path=profile_path)
             self.psi_content_mapper = PSIContentMapper()
             self.content_discovery = ContentDiscoveryEngine(
