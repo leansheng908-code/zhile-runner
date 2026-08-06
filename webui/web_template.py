@@ -523,6 +523,37 @@ body {
   border-color: var(--cyan);
   transform: rotate(15deg);
 }
+/* 麦克风按钮 */
+.input-area .mic-btn {
+  padding: 10px 14px;
+  background: var(--bg-input);
+  color: var(--pink);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 18px;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+.input-area .mic-btn:hover {
+  border-color: var(--pink);
+  background: rgba(255,143,171,0.08);
+}
+.input-area .mic-btn.recording {
+  background: var(--pink);
+  color: var(--cream);
+  border-color: var(--pink);
+  animation: mic-pulse 1.2s ease-in-out infinite;
+}
+.input-area .mic-btn.transcribing {
+  background: var(--cyan);
+  color: var(--bg);
+  border-color: var(--cyan);
+  opacity: 0.7;
+}
+@keyframes mic-pulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255,143,171,0.4); }
+  50% { transform: scale(1.08); box-shadow: 0 0 0 8px rgba(255,143,171,0); }
+}
 
 /* ─── 手机端切换按钮 ─── */
 .mobile-toggle {
@@ -704,6 +735,7 @@ body {
     <button class="cmd-toggle" id="cmd-toggle" onclick="toggleCmdPanel()">🐾</button>
     <textarea id="input" placeholder="跟知乐说点什么..." rows="1"
       onkeydown="onKey(event)" oninput="autoResize(this)"></textarea>
+    <button id="mic-btn" class="mic-btn" onclick="toggleMic()" title="按住说话 / 点击录音">🎤</button>
     <button id="send-btn" onclick="send()">发送</button>
   </div>
 </div>
@@ -854,7 +886,8 @@ async function send() {
             gotAnyData = true;
             if (data.chunk) {
               if (firstChunk) { msgEl.textContent = ''; firstChunk = false; }
-              msgEl.textContent += data.chunk;
+              // P0.58: 剥离Live2D动作标签，用户不可见
+              msgEl.textContent += data.chunk.replace(/\{[me]:[^}]+\}/g, '');
               scrollBottom();
             }
             if (data.error) {
@@ -865,6 +898,10 @@ async function send() {
               if (data.psi) updatePSI(data.psi);
               if (data.status) updateStatus(data.status);
               if (data.avatar) updateAvatar(data.avatar);
+              // P0.58: Live2D动作标签（Live2D接入后由模型消费）
+              if (data.motions && data.motions.length > 0) {
+                console.log('[Live2D] motions:', data.motions);
+              }
               if (data.audio_url) {
                 // Windows桌面端：MCI已在后端直接播放，前端不再重复播放
               }
@@ -897,6 +934,134 @@ function toggleCmdPanel() {
   panel.classList.toggle('open');
   btn.classList.toggle('active');
 }
+
+// ─── 语音录音 ASR ─────────────────────
+let mediaRecorder = null;
+let audioChunks = [];
+let isRecording = false;
+let asrAvailable = null; // null=未检查, true/false
+
+async function checkASR() {
+  if (asrAvailable !== null) return asrAvailable;
+  try {
+    const resp = await fetch('/api/asr_status');
+    const data = await resp.json();
+    asrAvailable = data.enabled && data.available;
+  } catch(e) {
+    asrAvailable = false;
+  }
+  return asrAvailable;
+}
+
+async function toggleMic() {
+  if (isRecording) {
+    stopRecording();
+  } else {
+    await startRecording();
+  }
+}
+
+async function startRecording() {
+  const ok = await checkASR();
+  if (!ok) {
+    alert('语音识别未启用或模型未加载\\n请在config.json中配置 asr.enabled = true');
+    return;
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    audioChunks = [];
+
+    // 优先使用 webm/opus，Safari 回退到 mp4
+    let mimeType = 'audio/webm;codecs=opus';
+    if (!MediaRecorder.isTypeSupported(mimeType)) {
+      mimeType = 'audio/webm';
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = 'audio/mp4';
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+          mimeType = '';
+        }
+      }
+    }
+
+    mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) audioChunks.push(e.data);
+    };
+
+    mediaRecorder.onstop = async () => {
+      // 停止所有音轨
+      stream.getTracks().forEach(t => t.stop());
+
+      const audioBlob = new Blob(audioChunks, { type: mimeType || 'audio/webm' });
+      if (audioBlob.size < 500) {
+        // 太短，可能是误触
+        return;
+      }
+      await transcribeAudio(audioBlob, mimeType || 'audio/webm');
+    };
+
+    mediaRecorder.start();
+    isRecording = true;
+
+    const btn = document.getElementById('mic-btn');
+    btn.classList.add('recording');
+    btn.textContent = '⏹';
+
+  } catch(e) {
+    console.error('录音启动失败:', e);
+    alert('无法访问麦克风: ' + e.message);
+  }
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+  }
+  isRecording = false;
+  const btn = document.getElementById('mic-btn');
+  btn.classList.remove('recording');
+  btn.textContent = '🎤';
+}
+
+async function transcribeAudio(blob, mimeType) {
+  const btn = document.getElementById('mic-btn');
+  btn.classList.add('transcribing');
+  btn.textContent = '⏳';
+
+  const textarea = document.getElementById('input');
+
+  try {
+    const ext = mimeType.includes('webm') ? 'webm' : (mimeType.includes('mp4') ? 'mp4' : 'wav');
+    const formData = new FormData();
+    formData.append('audio', blob, `recording.${ext}`);
+
+    const resp = await fetch('/api/asr', { method: 'POST', body: formData });
+    const data = await resp.json();
+
+    if (data.error) {
+      console.error('ASR错误:', data.error);
+      alert('语音识别失败: ' + data.error);
+    } else if (data.text) {
+      // 把识别结果填入输入框
+      // 如果已有内容，加个空格拼接
+      const existing = textarea.value.trim();
+      textarea.value = existing ? existing + ' ' + data.text : data.text;
+      autoResize(textarea);
+      textarea.focus();
+      // 光标移到末尾
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    }
+  } catch(e) {
+    console.error('ASR请求失败:', e);
+    alert('语音识别请求失败: ' + e.message);
+  } finally {
+    btn.classList.remove('transcribing');
+    btn.textContent = '🎤';
+  }
+}
+
 function runCmd(cmd) {
   toggleCmdPanel();
   document.getElementById('input').value = cmd;
