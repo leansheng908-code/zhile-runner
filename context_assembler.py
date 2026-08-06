@@ -62,6 +62,54 @@ class ContextAssembler:
         """更新记忆上下文（动态检索后调用）"""
         self.memory_context = memory_context
 
+    def is_repeat_query(self, user_message: str, threshold: float = 0.8) -> bool:
+        """检查用户消息是否与最近对话历史高度重复（防记忆复读）
+
+        场景：用户多次说"再试一下"→记忆存了旧交互→检索到旧记忆→LLM复读
+        修复：当前消息与最近用户消息bigram相似度>阈值时返回True，
+        core.py据此跳过动态记忆检索，保留上一轮memory_context。
+
+        参数：
+        - threshold: 相似度阈值，0.8=高度重复
+        """
+        if not self.history or len(user_message) < 3:
+            return False
+
+        recent_user_msgs = []
+        for msg in self.history[-12:]:
+            if isinstance(msg, dict) and msg.get("role") == "user":
+                content = msg.get("content", "")
+                if content and len(content) >= 3:
+                    recent_user_msgs.append(content)
+
+        if not recent_user_msgs:
+            return False
+
+        for prev in recent_user_msgs:
+            sim = self._bigram_similarity(user_message, prev)
+            if sim > threshold:
+                return True
+        return False
+
+    @staticmethod
+    def _bigram_similarity(text1: str, text2: str) -> float:
+        """字符bigram Jaccard相似度（中文友好，无需分词）"""
+        def get_bigrams(text):
+            text = text.replace(" ", "").replace("\n", "").replace("\r", "")
+            if len(text) < 2:
+                return set()
+            return set(text[i:i+2] for i in range(len(text) - 1))
+
+        bg1 = get_bigrams(text1)
+        bg2 = get_bigrams(text2)
+
+        if not bg1 or not bg2:
+            return 0.0
+
+        intersection = bg1 & bg2
+        union = bg1 | bg2
+        return len(intersection) / len(union) if union else 0.0
+
     def set_psi_context(self, psi_context: str):
         self.psi_context = psi_context
 
