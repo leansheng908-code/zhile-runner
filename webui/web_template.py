@@ -865,7 +865,9 @@ async function send() {
               if (data.psi) updatePSI(data.psi);
               if (data.status) updateStatus(data.status);
               if (data.avatar) updateAvatar(data.avatar);
-              if (data.audio_url) playAudio(data.audio_url);
+              if (data.audio_url) {
+                // Windows桌面端：MCI已在后端直接播放，前端不再重复播放
+              }
             }
           } catch(e) { console.log('parse error:', e, line); }
         }
