@@ -98,6 +98,11 @@ class WhisperASRProvider(ASRProvider):
     def _init_model(self):
         """加载 faster-whisper 模型"""
         try:
+            # 国内用户使用 HuggingFace 镜像
+            if not os.environ.get("HF_ENDPOINT"):
+                os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+                print(f"[ASR] 使用HuggingFace镜像: {os.environ['HF_ENDPOINT']}")
+
             from faster_whisper import WhisperModel
 
             # 自动选择设备
