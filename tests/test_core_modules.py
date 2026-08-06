@@ -1162,3 +1162,108 @@ def test_proactive_psi_strategy_trigger():
     # Test with high belonging → no trigger
     ctx.psi.needs['relatedness'].level = 3.0
     assert strategy.should_trigger(ctx) == False
+
+
+# ===== P0.79 Tests =====
+
+def test_interest_profiler_init():
+    """测试兴趣画像初始化"""
+    from content_discovery import InterestProfiler
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as td:
+        path = os.path.join(td, "profile.json")
+        profiler = InterestProfiler(profile_path=path)
+        assert "二次元" in profiler.tags
+        assert "AI" in profiler.tags
+        assert profiler.tags["二次元"]["weight"] == 7
+
+
+def test_interest_profiler_chat_extraction():
+    """测试从聊天文本提取兴趣信号"""
+    from content_discovery import InterestProfiler
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as td:
+        path = os.path.join(td, "profile.json")
+        profiler = InterestProfiler(profile_path=path)
+        profiler.update_from_chat("我最近在玩崩坏星穹铁道，感觉剧情不错")
+        # 应该提取到崩坏三、星穹铁道
+        assert profiler.tags["崩坏三"]["weight"] > 7  # 默认7+0.5
+        assert profiler.tags["星穹铁道"]["weight"] > 6
+        # 文件应该已保存
+        assert os.path.exists(path)
+
+
+def test_interest_profiler_feedback():
+    """测试反馈闭环"""
+    from content_discovery import InterestProfiler
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as td:
+        path = os.path.join(td, "profile.json")
+        profiler = InterestProfiler(profile_path=path)
+        original_weight = profiler.tags["AI"]["weight"]
+        profiler.update_from_feedback("AI", "positive")
+        assert profiler.tags["AI"]["weight"] == original_weight + 1
+        profiler.update_from_feedback("AI", "negative")
+        assert profiler.tags["AI"]["weight"] == original_weight
+        assert len(profiler.feedback_history) == 2
+
+
+def test_psi_content_mapper():
+    """测试PSI→内容类型映射"""
+    from content_discovery import PSIContentMapper
+    mapper = PSIContentMapper()
+
+    # 归属感赤字
+    psi_low = {"belonging": 1.0, "energy": 3.0, "certainty": 3.0, "competence": 3.0, "autonomy": 3.0}
+    hits = mapper.analyze_psi(psi_low)
+    assert "belonging_low" in hits
+
+    # 能量低
+    psi_energy_low = {"belonging": 3.0, "energy": 1.0, "certainty": 3.0, "competence": 3.0, "autonomy": 3.0}
+    hits = mapper.analyze_psi(psi_energy_low)
+    assert "energy_low" in hits
+
+    # 自主性高
+    psi_auto_high = {"belonging": 3.0, "energy": 3.0, "certainty": 3.0, "competence": 3.0, "autonomy": 4.0}
+    hits = mapper.analyze_psi(psi_auto_high)
+    assert "autonomy_high" in hits
+
+    # 正常状态不触发
+    psi_normal = {"belonging": 3.0, "energy": 3.0, "certainty": 3.0, "competence": 3.0, "autonomy": 3.0}
+    hits = mapper.analyze_psi(psi_normal)
+    assert len(hits) == 0
+
+
+def test_psi_content_mapper_annotation():
+    """测试PSI感知注释生成"""
+    from content_discovery import PSIContentMapper
+    mapper = PSIContentMapper()
+
+    psi_low = {"belonging": 1.0, "energy": 1.0, "certainty": 3.0, "competence": 3.0, "autonomy": 3.0}
+    annotation = mapper.get_annotation(psi_low)
+    assert "归属感" in annotation or "能量" in annotation
+    assert "[内容推荐感知]" in annotation
+
+    # 正常状态无注释
+    psi_normal = {"belonging": 3.0, "energy": 3.0, "certainty": 3.0, "competence": 3.0, "autonomy": 3.0}
+    annotation = mapper.get_annotation(psi_normal)
+    assert annotation == ""
+
+
+def test_content_discovery_engine():
+    """测试内容发现引擎完整流程"""
+    from content_discovery import InterestProfiler, PSIContentMapper, ContentDiscoveryEngine
+    import tempfile, os
+    with tempfile.TemporaryDirectory() as td:
+        path = os.path.join(td, "profile.json")
+        profiler = InterestProfiler(profile_path=path)
+        mapper = PSIContentMapper()
+        engine = ContentDiscoveryEngine(profiler, mapper)
+
+        psi_state = {"belonging": 1.5, "energy": 2.5, "certainty": 3.0, "competence": 3.0, "autonomy": 3.0}
+        result = engine.discover(psi_state, max_keywords=3)
+
+        assert len(result["keywords"]) > 0
+        assert "belonging_low" in result["psi_hits"]
+        assert result["annotation"] != ""
+        assert "二次元" in result["profile_summary"] or "AI" in result["profile_summary"]
