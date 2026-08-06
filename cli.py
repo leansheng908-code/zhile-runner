@@ -367,6 +367,8 @@ class CLI:
             self._handle_suggest(parts)
         elif main_cmd == "/destiny":
             self._handle_destiny(parts)
+        elif main_cmd == "/sleep":
+            self._handle_sleep(parts)
         else:
             print(f"{Color.DIM}未知命令，输入 /help 查看可用命令{Color.RESET}")
 
@@ -3443,3 +3445,77 @@ class CLI:
                 print(f"  第{i}步: {Color.YELLOW}{gz}{Color.RESET} ({nayin})"
                       f"  {start_age}~{end_age}岁  {start_year}~{end_year}年"
                       f"  十神:{ss}{marker}")
+
+    def _handle_sleep(self, parts: list):
+        """处理 /sleep 命令 — 睡眠系统管理"""
+        if not self.core or not self.core.sleep_manager:
+            print(f"{Color.DIM}睡眠系统未启用{Color.RESET}")
+            return
+
+        sub = parts[1] if len(parts) > 1 else "status"
+
+        if sub == "status":
+            status = self.core.sleep_status()
+            state_cn = status.get("state_cn", "?")
+            idle_min = status.get("idle_minutes", 0)
+            print(f"{Color.DIM}─── 睡眠系统 ───{Color.RESET}")
+            print(f"  状态: {Color.CYAN}{state_cn}{Color.RESET}")
+            print(f"  空闲: {idle_min:.0f}分钟")
+            print(f"  阈值: 浅睡{status['thresholds']['light_min']:.0f}min / 深睡{status['thresholds']['deep_min']:.0f}min")
+            print(f"  睡眠时段: {status['thresholds']['full_sleep_hours']}")
+            if status.get("alarm"):
+                print(f"  闹钟: {Color.YELLOW}{status['alarm']}{Color.RESET} ({status.get('alarm_set_by','')})")
+            if status.get("last_wake_from"):
+                print(f"  上次唤醒: 从{status['last_wake_from']}醒来（{status['last_wake_reason']}）")
+            if status.get("dream"):
+                d = status["dream"]
+                print(f"  做梦次数: {d['dream_count']}  上次: {d.get('last_dream_time','无')}")
+            if status.get("wake_word"):
+                w = status["wake_word"]
+                print(f"  唤醒词: {w['wake_word']}  引擎: {w['engine']}  唤醒{w['wake_count']}次")
+
+        elif sub == "wake":
+            result = self.core.sleep_wake(reason="manual_cli")
+            print(f"{Color.GREEN}已唤醒 → {result['state_cn']}{Color.RESET}")
+
+        elif sub == "dream":
+            print(f"{Color.DIM}开始做梦...{Color.RESET}")
+            result = self.core.sleep_run_dream()
+            completed = result.get("completed", 0)
+            total = result.get("total_tasks", 0)
+            print(f"{Color.GREEN}做梦完成: {completed}/{total}任务完成{Color.RESET}")
+            for name, r in result.get("results", {}).items():
+                if "error" in r:
+                    print(f"  {Color.RED}✗ {name}: {r['error']}{Color.RESET}")
+                else:
+                    print(f"  {Color.GREEN}✓ {name}{Color.RESET}")
+
+        elif sub == "alarm":
+            if len(parts) < 3:
+                print(f"{Color.DIM}用法: /sleep alarm <小时> [分钟]{Color.RESET}")
+                return
+            try:
+                hour = int(parts[2])
+                minute = int(parts[3]) if len(parts) > 3 else 0
+                result = self.core.sleep_set_alarm(hour, minute)
+                print(f"{Color.YELLOW}闹钟已设: {result['alarm']}{Color.RESET}")
+            except ValueError:
+                print(f"{Color.RED}无效时间{Color.RESET}")
+
+        elif sub == "force":
+            if len(parts) < 3:
+                print(f"{Color.DIM}用法: /sleep force <awake|light|deep|full>{Color.RESET}")
+                return
+            result = self.core.sleep_force_state(parts[2])
+            if "error" in result:
+                print(f"{Color.RED}{result['error']}{Color.RESET}")
+            else:
+                print(f"{Color.YELLOW}强制切换 → {result['state_cn']}{Color.RESET}")
+
+        else:
+            print(f"{Color.DIM}用法:{Color.RESET}")
+            print(f"  /sleep status  — 查看睡眠状态")
+            print(f"  /sleep wake    — 手动唤醒")
+            print(f"  /sleep dream   — 手动触发做梦")
+            print(f"  /sleep alarm <时> [分] — 设闹钟")
+            print(f"  /sleep force <state>   — 强制切换状态")
