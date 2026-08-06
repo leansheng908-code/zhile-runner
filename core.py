@@ -101,6 +101,13 @@ from dream_scheduler import DreamScheduler
 from wake_awareness import WakeAwareness
 from wake_word import WakeWordListener
 
+# P0.58: TTS语音合成Provider
+try:
+    from tts_provider import TTSEngine
+    _TTS_AVAILABLE = True
+except ImportError:
+    _TTS_AVAILABLE = False
+
 # P0.24: 易经认知编码系统
 import sys as _sys, os as _os
 _yi_jing_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'yi_jing')
@@ -508,6 +515,13 @@ class ZhileCore:
             self.interest_profiler = None
             self.psi_content_mapper = None
             self.content_discovery = None
+
+        # P0.58: TTS语音合成
+        if _TTS_AVAILABLE:
+            tts_config = self.config.get("tts", {})
+            self.tts = TTSEngine(tts_config)
+        else:
+            self.tts = None
 
         # P0.37: 通道无关后台任务管理器
         self.background = BackgroundTaskManager(self)
@@ -1691,6 +1705,43 @@ class ZhileCore:
             import sys
             print(f"⚠ [新闻推送] 失败: {e}", file=sys.stderr)
             return None
+
+    # ─── P0.58: TTS语音合成 ───────────────────
+
+    def speak(self, text: str, emotion: str = None) -> Optional[str]:
+        """将文本合成为语音，返回音频文件路径
+
+        Args:
+            text: 要合成的文本
+            emotion: 情绪标签（可选，自动从PSI推断）
+
+        Returns:
+            音频文件路径，或None（TTS不可用/合成失败）
+        """
+        if not self.tts or not self.tts.enabled:
+            return None
+
+        # 如果没指定情绪，从PSI推断
+        if not emotion and self.psi:
+            psi_state = {
+                "belonging": getattr(self.psi, 'belonging', 3.0),
+                "energy": getattr(self.psi, 'energy', 3.0),
+                "certainty": getattr(self.psi, 'certainty', 3.0),
+                "competence": getattr(self.psi, 'competence', 3.0),
+                "autonomy": getattr(self.psi, 'autonomy', 3.0),
+            }
+            emotion = self.tts.emotion_from_psi(psi_state)
+
+        result = self.tts.synthesize(text, emotion=emotion)
+        if result:
+            return result.audio_path
+        return None
+
+    def get_tts_status(self) -> dict:
+        """获取TTS状态"""
+        if not self.tts:
+            return {"enabled": False, "available": False, "provider": None}
+        return self.tts.get_status()
 
     # ─── 知觉日记 ─────────────────────────────
 
