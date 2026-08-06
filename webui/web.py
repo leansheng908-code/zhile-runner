@@ -947,45 +947,28 @@ class WebServer:
     def _play_sentences_threaded(self, text):
         """后台线程：分句合成+MCI顺序播放，合成与播放重叠，不阻塞主线程
 
-        生产者-消费者模式：
-        - 生产者：逐句调用TTS合成，放入队列
-        - 消费者：从队列取音频，MCI同步播放（play wait阻塞）
-        - 效果：第一句1-2秒出声，后续句子在前一句播放时合成
+        播放线程：core.speak()合成 → winsound同步播放
         """
-        import threading, ctypes, time as _time, os
+        import threading, winsound, os
 
         def _worker():
             try:
                 print("[TTS] speak开始...", flush=True)
-                # 直接用core.speak()，它已处理分句+合成+动作标签提取
                 audio_paths = self.core.speak(text)
                 print(f"[TTS] speak返回 {len(audio_paths)} 个音频", flush=True)
                 if not audio_paths:
-                    print("[TTS] 无音频返回，可能TTS未启用或合成失败", flush=True)
+                    print("[TTS] 无音频返回，TTS可能未启用", flush=True)
                     return
 
-                # 逐个MCI播放
                 for path in audio_paths:
-                    alias = None
                     try:
-                        alias = f"tts_{int(_time.time() * 1000)}"
-                        win_path = path.replace('/', '\\')
-                        print(f"[TTS] 播放: {win_path} ({os.path.getsize(path)} bytes)", flush=True)
-                        ret = ctypes.windll.winmm.mciSendStringW(
-                            f'open "{win_path}" type mpegvideo alias {alias}', None, 0, None)
-                        if ret == 0:
-                            ctypes.windll.winmm.mciSendStringW(f'play {alias} wait', None, 0, None)
-                            ctypes.windll.winmm.mciSendStringW(f'close {alias}', None, 0, None)
-                            print("[TTS] 播放完成", flush=True)
-                        else:
-                            print(f"[TTS] MCI open失败: ret={ret}", flush=True)
+                        win_path = os.path.abspath(path).replace('/', '\\')
+                        sz = os.path.getsize(path)
+                        print(f"[TTS] 播放: {win_path} ({sz} bytes)", flush=True)
+                        winsound.PlaySound(win_path, winsound.SND_FILENAME)
+                        print("[TTS] 播放完成", flush=True)
                     except Exception as e:
-                        print(f"[TTS] MCI异常: {e}", flush=True)
-                        if alias:
-                            try:
-                                ctypes.windll.winmm.mciSendStringW(f'close {alias}', None, 0, None)
-                            except Exception:
-                                pass
+                        print(f"[TTS] 播放异常: {e}", flush=True)
             except Exception as e:
                 print(f"[TTS] 线程异常: {e}", flush=True)
 
