@@ -7,7 +7,8 @@ Flask服务器，提供聊天界面 + PSI生命体征面板 + API端点
 """
 
 import json
-from flask import Flask, request, Response, jsonify
+import os
+from flask import Flask, request, Response, jsonify, send_file
 
 from core import ZhileCore
 from webui.web_template import PAGE_HTML
@@ -46,6 +47,8 @@ class WebServer:
         self.app.add_url_rule("/api/clear", "clear", self._clear,
                               methods=["POST"])
         self.app.add_url_rule("/api/avatar", "avatar", self._get_avatar)
+        self.app.add_url_rule("/api/tts_audio/<path:filename>", "tts_audio", self._tts_audio)
+        self.app.add_url_rule("/api/tts_toggle", "tts_toggle", self._tts_toggle, methods=["POST"])
 
     # ─── 页面 ─────────────────────────────────
 
@@ -717,7 +720,9 @@ class WebServer:
 
         def generate():
             try:
+                full_text = ""
                 for chunk in self.core.chat(message):
+                    full_text += chunk
                     yield f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}\n\n"
 
                 # P0.3: 自动成长扫描
@@ -725,11 +730,22 @@ class WebServer:
                 if scan_result.get("scanned") and scan_result.get("created", 0) > 0:
                     yield f"data: {json.dumps({'growth_scan': scan_result}, ensure_ascii=False)}\n\n"
 
+                # P0.58: 自动语音合成
+                audio_url = None
+                tts_cfg = self.core.config.get("tts", {})
+                if tts_cfg.get("auto_speak", False) and self.core.tts and full_text.strip():
+                    try:
+                        result = self.core.speak(full_text.strip())
+                        if result and result.file_path and os.path.exists(result.file_path):
+                            audio_url = f"/api/tts_audio/{os.path.basename(result.file_path)}"
+                    except Exception:
+                        pass
+
                 # 发送完成信号 + 更新后的状态
                 psi = self.core.get_psi_stats()
                 status = self.core.get_status()
                 avatar = self.avatar.get_expression(psi)
-                yield f"data: {json.dumps({'done': True, 'psi': psi, 'status': status, 'avatar': avatar}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'done': True, 'psi': psi, 'status': status, 'avatar': avatar, 'audio_url': audio_url}, ensure_ascii=False)}\n\n"
             except Exception as e:
                 yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
 
@@ -818,6 +834,29 @@ class WebServer:
         psi = self.core.get_psi_stats()
         expr = self.avatar.get_expression(psi)
         return jsonify({**expr, "config": self.avatar.get_avatar_info()})
+
+    # ─── TTS语音 ───────────────────────────────
+
+    def _tts_audio(self, filename):
+        """提供TTS音频文件"""
+        tts_cfg = self.core.config.get("tts", {})
+        cache_dir = tts_cfg.get("cache_dir", "memory/tts_cache")
+        if not os.path.isabs(cache_dir):
+            cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", cache_dir)
+        safe_name = os.path.basename(filename)
+        audio_path = os.path.join(cache_dir, safe_name)
+        if os.path.exists(audio_path):
+            return send_file(audio_path, mimetype="audio/mpeg")
+        return jsonify({"error": "audio not found"}), 404
+
+    def _tts_toggle(self):
+        """切换自动语音开关"""
+        data = request.get_json() or {}
+        enabled = data.get("enabled", False)
+        if "tts" not in self.core.config:
+            self.core.config["tts"] = {}
+        self.core.config["tts"]["auto_speak"] = enabled
+        return jsonify({"auto_speak": enabled})
 
     # ─── 启动 ─────────────────────────────────
 
