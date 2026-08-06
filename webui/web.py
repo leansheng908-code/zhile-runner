@@ -945,11 +945,12 @@ class WebServer:
             print(f"[TTS] MCI play error: {e}")
 
     def _play_sentences_threaded(self, text):
-        """后台线程：分句合成+MCI顺序播放，合成与播放重叠，不阻塞主线程
+        """后台线程：分句合成+subprocess播放
 
-        播放线程：core.speak()合成 → winsound同步播放
+        用subprocess调用play_wav.py在独立进程中运行MCI播放，
+        避免daemon线程无消息泵导致MCI/winsound静默失败。
         """
-        import threading, winsound, os
+        import threading, subprocess, sys, os
 
         def _worker():
             try:
@@ -960,13 +961,26 @@ class WebServer:
                     print("[TTS] 无音频返回，TTS可能未启用", flush=True)
                     return
 
+                play_script = os.path.join(
+                    os.path.dirname(os.path.abspath(__file__)), '..', 'play_wav.py'
+                )
+                play_script = os.path.abspath(play_script)
+
                 for path in audio_paths:
                     try:
                         win_path = os.path.abspath(path).replace('/', '\\')
                         sz = os.path.getsize(path)
                         print(f"[TTS] 播放: {win_path} ({sz} bytes)", flush=True)
-                        winsound.PlaySound(win_path, winsound.SND_FILENAME)
+                        result = subprocess.run(
+                            [sys.executable, '-X', 'utf8', play_script, win_path],
+                            timeout=30,
+                            capture_output=True, text=True
+                        )
+                        if result.returncode != 0:
+                            print(f"[TTS] play_wav退出码={result.returncode}: {result.stderr.strip()}", flush=True)
                         print("[TTS] 播放完成", flush=True)
+                    except subprocess.TimeoutExpired:
+                        print(f"[TTS] 播放超时", flush=True)
                     except Exception as e:
                         print(f"[TTS] 播放异常: {e}", flush=True)
             except Exception as e:
