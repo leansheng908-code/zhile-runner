@@ -8,6 +8,7 @@ Flask服务器，提供聊天界面 + PSI生命体征面板 + API端点
 
 import json
 import os
+import sys
 from flask import Flask, request, Response, jsonify, send_file
 
 from core import ZhileCore
@@ -738,6 +739,9 @@ class WebServer:
                         audio_path = self.core.speak(full_text.strip())
                         if audio_path and os.path.exists(audio_path):
                             audio_url = f"/api/tts_audio/{os.path.basename(audio_path)}"
+                            # Windows桌面端：用MCI直接播放（绕过浏览器音频限制）
+                            if sys.platform == 'win32':
+                                self._play_audio_mci(audio_path)
                     except Exception as e:
                         print(f"[TTS] auto-speak error: {e}")
 
@@ -836,6 +840,28 @@ class WebServer:
         return jsonify({**expr, "config": self.avatar.get_avatar_info()})
 
     # ─── TTS语音 ───────────────────────────────
+
+    def _play_audio_mci(self, filepath):
+        """Windows桌面端：用MCI直接播放音频（绕过浏览器音频限制）"""
+        try:
+            import ctypes, threading, time as _time
+            alias = f"tts_{int(_time.time() * 1000)}"
+            ret = ctypes.windll.winmm.mciSendStringW(
+                f'open "{filepath}" type mpegvideo alias {alias}', None, 0, None
+            )
+            if ret == 0:
+                ctypes.windll.winmm.mciSendStringW(f'play {alias}', None, 0, None)
+                def _close():
+                    _time.sleep(30)
+                    try:
+                        ctypes.windll.winmm.mciSendStringW(f'close {alias}', None, 0, None)
+                    except Exception:
+                        pass
+                threading.Thread(target=_close, daemon=True).start()
+            else:
+                print(f"[TTS] MCI open failed: {ret}")
+        except Exception as e:
+            print(f"[TTS] MCI play error: {e}")
 
     def _tts_audio(self, filename):
         """提供TTS音频文件"""
