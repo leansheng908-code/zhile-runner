@@ -676,6 +676,7 @@ body {
         <button class="cmd-btn" onclick="runCmd('/schedule')"><span class="cmd-icon">⏰</span><span class="cmd-label">定时任务</span></button>
         <button class="cmd-btn" onclick="runCmd('/bgplugin')"><span class="cmd-icon">🔌</span><span class="cmd-label">后台插件</span></button>
         <button class="cmd-btn" onclick="runCmd('/sleep')"><span class="cmd-icon">😴</span><span class="cmd-label">睡眠状态</span></button>
+        <button class="cmd-btn" onclick="runCmd('/tts')"><span class="cmd-icon">🗣️</span><span class="cmd-label">语音设置</span></button>
       </div>
 
       <!-- 🐾 技能插件组 -->
