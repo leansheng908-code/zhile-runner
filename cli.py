@@ -3547,6 +3547,8 @@ class CLI:
             print(f"\n{Color.DIM}用法:{Color.RESET}")
             print(f"  /tts <文本>       — 合成语音")
             print(f"  /tts voice <名称> — 切换音色")
+            print(f"  /tts volume <数值> — 音量(-100~+100)")
+            print(f"  /tts rate <数值>  — 语速(-100~+100)")
             print(f"  /tts status       — 查看状态")
             return
 
@@ -3570,6 +3572,46 @@ class CLI:
             from tts_provider import TTSEngine
             self.core.tts = TTSEngine(self.core.config["tts"])
             print(f"{Color.GREEN}✅ 音色已切换为: {voice_name}{Color.RESET}")
+            return
+
+        if sub == "volume":
+            if len(parts) < 3:
+                current = self.core.config.get("tts", {}).get("volume", 0)
+                print(f"当前音量: {Color.CYAN}{current:+d}{Color.RESET} (范围 -100~+100)")
+                print(f"{Color.DIM}用法: /tts volume 20  (增大音量){Color.RESET}")
+                print(f"{Color.DIM}      /tts volume -30 (减小音量){Color.RESET}")
+                return
+            try:
+                vol = int(parts[2])
+                vol = max(-100, min(100, vol))
+                if "tts" not in self.core.config:
+                    self.core.config["tts"] = {}
+                self.core.config["tts"]["volume"] = vol
+                from tts_provider import TTSEngine
+                self.core.tts = TTSEngine(self.core.config["tts"])
+                print(f"{Color.GREEN}✅ 音量已设为: {vol:+d}{Color.RESET}")
+            except ValueError:
+                print(f"{Color.RED}请输入数字(-100~+100){Color.RESET}")
+            return
+
+        if sub == "rate":
+            if len(parts) < 3:
+                current = self.core.config.get("tts", {}).get("rate", 0)
+                print(f"当前语速: {Color.CYAN}{current:+d}{Color.RESET} (范围 -100~+100)")
+                print(f"{Color.DIM}用法: /tts rate 10  (加快语速){Color.RESET}")
+                print(f"{Color.DIM}      /tts rate -20 (减慢语速){Color.RESET}")
+                return
+            try:
+                r = int(parts[2])
+                r = max(-100, min(100, r))
+                if "tts" not in self.core.config:
+                    self.core.config["tts"] = {}
+                self.core.config["tts"]["rate"] = r
+                from tts_provider import TTSEngine
+                self.core.tts = TTSEngine(self.core.config["tts"])
+                print(f"{Color.GREEN}✅ 语速已设为: {r:+d}{Color.RESET}")
+            except ValueError:
+                print(f"{Color.RED}请输入数字(-100~+100){Color.RESET}")
             return
 
         # 合成语音
