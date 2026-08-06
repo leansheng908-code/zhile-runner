@@ -705,26 +705,38 @@ class WebServer:
                 return "TTS Provider不可用\nEdge TTS: pip install edge-tts"
 
             if not sub or sub == "status":
-                current_voice = tts_cfg.get("voice", "xiaoyi")
                 current_vol = tts_cfg.get("volume", 0)
                 current_rate = tts_cfg.get("rate", 0)
                 auto = tts_cfg.get("auto_speak", False)
+                provider_name = status.get("provider", "?")
                 lines = ["═══ TTS语音合成 ═══",
-                         f"  Provider: {status.get('provider','?')}",
-                         f"  音色: {current_voice}",
+                         f"  Provider: {provider_name}",
                          f"  音量: {current_vol:+d}  语速: {current_rate:+d}",
-                         f"  自动语音: {'✅开' if auto else '❌关'}", "",
-                         "可用音色:"]
-                for vid, desc in status.get("voices", []):
-                    mark = " ←" if vid == current_voice else ""
-                    lines.append(f"  {vid} — {desc}{mark}")
-                lines += ["", "用法:",
-                          "  /tts voice <名称>  — 切换音色",
-                          "  /tts volume <数值> — 音量(-100~+100)",
-                          "  /tts rate <数值>   — 语速(-100~+100)"]
+                         f"  自动语音: {'✅开' if auto else '❌关'}"]
+                if provider_name == "gpt_sovits":
+                    ref_name = os.path.basename(tts_cfg.get("ref_audio_path", "未配置"))
+                    lines.append(f"  参考音频: {ref_name}")
+                    lines += ["", "用法:",
+                              "  /tts volume <数值> — 音量(-100~+100)",
+                              "  /tts rate <数值>   — 语速(-100~+100)",
+                              "  /tts ref <路径>    — 切换参考音频"]
+                else:
+                    current_voice = tts_cfg.get("voice", "xiaoyi")
+                    lines.append(f"  音色: {current_voice}")
+                    lines += ["", "可用音色:"]
+                    for vid, desc in status.get("voices", []):
+                        mark = " ←" if vid == current_voice else ""
+                        lines.append(f"  {vid} — {desc}{mark}")
+                    lines += ["", "用法:",
+                              "  /tts voice <名称>  — 切换音色",
+                              "  /tts volume <数值> — 音量(-100~+100)",
+                              "  /tts rate <数值>   — 语速(-100~+100)"]
                 return "\n".join(lines)
 
             if sub == "voice":
+                provider_name = status.get("provider", "?")
+                if provider_name == "gpt_sovits":
+                    return "GPT-SoVITS音色由参考音频决定，不能用voice切换。\n用 /tts ref <音频路径> 切换参考音频。"
                 voice_name = parts[2] if len(parts) > 2 else ""
                 if not voice_name:
                     current = tts_cfg.get("voice", "xiaoyi")
@@ -740,6 +752,21 @@ class WebServer:
                 from tts_provider import TTSEngine
                 self.core.tts = TTSEngine(self.core.config["tts"])
                 return f"✅ 音色已切换为: {voice_name}"
+
+            if sub == "ref":
+                ref_path = parts[2] if len(parts) > 2 else ""
+                if not ref_path:
+                    current = tts_cfg.get("ref_audio_path", "未配置")
+                    return f"当前参考音频: {current}\n用法: /tts ref <wav文件路径>"
+                if not os.path.exists(ref_path):
+                    return f"文件不存在: {ref_path}"
+                if "tts" not in self.core.config:
+                    self.core.config["tts"] = {}
+                self.core.config["tts"]["ref_audio_path"] = ref_path
+                self._save_tts_config()
+                from tts_provider import TTSEngine
+                self.core.tts = TTSEngine(self.core.config["tts"])
+                return f"✅ 参考音频已切换为: {os.path.basename(ref_path)}"
 
             if sub == "volume":
                 val = parts[2] if len(parts) > 2 else ""
@@ -966,13 +993,14 @@ class WebServer:
                 )
                 play_script = os.path.abspath(play_script)
 
+                tts_vol = int(self.core.config.get("tts", {}).get("volume", 0))
                 for path in audio_paths:
                     try:
                         win_path = os.path.abspath(path).replace('/', '\\')
                         sz = os.path.getsize(path)
-                        print(f"[TTS] 播放: {win_path} ({sz} bytes)", flush=True)
+                        print(f"[TTS] 播放: {win_path} ({sz} bytes) vol={tts_vol}", flush=True)
                         result = subprocess.run(
-                            [sys.executable, '-X', 'utf8', play_script, win_path],
+                            [sys.executable, '-X', 'utf8', play_script, win_path, str(tts_vol)],
                             timeout=30,
                             capture_output=True, text=True
                         )
