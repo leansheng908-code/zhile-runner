@@ -285,6 +285,18 @@ body {
   box-shadow: 0 0 8px var(--green);
 }
 .chat-header span { font-size: 14px; color: var(--text-dim); }
+.tts-btn {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.tts-btn:hover { background: var(--surface-hover); }
+.tts-btn.active { background: var(--pink-soft); border-color: var(--pink); }
 
 /* ─── 消息区 ─── */
 .messages {
@@ -611,6 +623,7 @@ body {
   <div class="chat-header">
     <div class="dot"></div>
     <span id="status-text">连接中...</span>
+    <button id="tts-toggle-btn" class="tts-btn" onclick="toggleTTS()" title="开关自动语音">🔇</button>
   </div>
   <div class="messages" id="messages"></div>
 
@@ -851,6 +864,7 @@ async function send() {
               if (data.psi) updatePSI(data.psi);
               if (data.status) updateStatus(data.status);
               if (data.avatar) updateAvatar(data.avatar);
+              if (data.audio_url) playAudio(data.audio_url);
             }
           } catch(e) { console.log('parse error:', e, line); }
         }
@@ -949,6 +963,26 @@ function onKey(e) {
 function autoResize(el) {
   el.style.height = 'auto';
   el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+// ─── TTS自动语音 ───
+let ttsEnabled = localStorage.getItem('tts_auto') === '1';
+if (ttsEnabled) document.getElementById('tts-toggle-btn').classList.add('active');
+document.getElementById('tts-toggle-btn').textContent = ttsEnabled ? '🔊' : '🔇';
+
+function toggleTTS() {
+  ttsEnabled = !ttsEnabled;
+  localStorage.setItem('tts_auto', ttsEnabled ? '1' : '0');
+  const btn = document.getElementById('tts-toggle-btn');
+  btn.textContent = ttsEnabled ? '🔊' : '🔇';
+  btn.classList.toggle('active', ttsEnabled);
+  fetch('/api/tts_toggle', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({enabled: ttsEnabled})});
+}
+
+function playAudio(url) {
+  if (!url) return;
+  const audio = new Audio(url);
+  audio.play().catch(() => {});
 }
 
 init();
