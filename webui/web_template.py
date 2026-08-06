@@ -626,6 +626,7 @@ body {
     <button id="tts-toggle-btn" class="tts-btn" onclick="toggleTTS()" title="开关自动语音">🔇</button>
   </div>
   <div class="messages" id="messages"></div>
+  <audio id="tts-player" style="display:block;width:100%;margin-top:4px" controls></audio>
 
   <!-- 命令面板 -->
   <div class="cmd-panel" id="cmd-panel">
@@ -979,19 +980,16 @@ function toggleTTS() {
   btn.textContent = ttsEnabled ? '🔊' : '🔇';
   btn.classList.toggle('active', ttsEnabled);
   fetch('/api/tts_toggle', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({enabled: ttsEnabled})});
-  // 用户点击时解锁音频元素
-  if (ttsEnabled && !_audioEl) {
-    _audioEl = new Audio();
-    _audioEl.volume = 0;
-    _audioEl.play().then(() => { _audioEl.volume = 1; }).catch(() => {});
-  }
 }
 
 function playAudio(url) {
-  if (!url || !_audioEl) return;
-  _audioEl.src = url;
-  _audioEl.volume = 1;
-  _audioEl.play().catch(e => console.log('audio play failed:', e));
+  if (!url) return;
+  console.log('playAudio:', url);
+  const player = document.getElementById('tts-player');
+  if (player) {
+    player.src = url;
+    player.play().then(() => console.log('audio playing OK')).catch(e => console.log('audio play failed:', e));
+  }
 }
 
 init();
