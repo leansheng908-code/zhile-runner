@@ -13,25 +13,25 @@ PAGE_HTML = r"""<!DOCTYPE html>
 <title>知乐 · 本地运行器</title>
 <style>
 :root {
-  /* ─── 暖色猫娘色彩系统 ─── */
-  --bg: #2a1f30;            /* 暖紫褐（提亮） */
-  --bg-card: #352a3c;       /* 卡片暖紫（提亮） */
-  --bg-input: #3a2f42;      /* 暖深紫输入框（提亮） */
-  --pink: #ff8fab;           /* 暖橙粉 */
-  --pink-dim: #d4738a;       /* 暗橙粉 */
-  --pink-glow: rgba(255,143,171,0.15);
-  --cream: #fff5f7;          /* 奶白 */
-  --cyan: #7fdcd0;           /* 薄青 */
-  --cyan-dim: #5fb3a8;       /* 暗薄青 */
-  --yellow: #ffd6a0;         /* 柔黄 */
-  --green: #a8d8a8;           /* 暖绿 */
-  --red: #ff8a8a;            /* 暖红 */
-  --text: #f0e8e8;           /* 暖白 */
-  --text-dim: #9a8e9a;       /* 暗灰 */
-  --border: #3a3040;         /* 暖暗灰 */
+  /* ─── 暖粉猫娘色彩系统（浅色版） ─── */
+  --bg: #fdf6f7;            /* 暖奶粉底色 */
+  --bg-card: #fff0f3;       /* 浅粉卡片 */
+  --bg-input: #fce7ec;      /* 柔粉输入框 */
+  --pink: #ff6b9d;           /* 亮粉 */
+  --pink-dim: #e85d88;       /* 深粉 */
+  --pink-glow: rgba(255,107,157,0.12);
+  --cream: #ffffff;          /* 纯白 */
+  --cyan: #4db6ac;           /* 青绿 */
+  --cyan-dim: #3a9b91;       /* 深青绿 */
+  --yellow: #ffb74d;         /* 暖黄 */
+  --green: #66bb6a;           /* 清新绿 */
+  --red: #ef5350;            /* 暖红 */
+  --text: #4a3a44;           /* 暖深灰（可读） */
+  --text-dim: #8a7a84;       /* 中暖灰 */
+  --border: #f0d5dd;         /* 浅粉边框 */
   --radius: 16px;
-  --shadow: 0 4px 16px rgba(255,143,171,0.08);
-  --shadow-hover: 0 6px 24px rgba(255,143,171,0.15);
+  --shadow: 0 4px 16px rgba(255,107,157,0.08);
+  --shadow-hover: 0 6px 24px rgba(255,107,157,0.15);
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
@@ -315,7 +315,7 @@ body {
 /* 知乐消息 — 左对齐 + 左上猫耳三角 */
 .msg.zhile {
   align-self: flex-start;
-  background: var(--bg-card);
+  background: var(--cream);
   border: 1px solid var(--border);
   border-bottom-left-radius: 6px;
   animation: slideInLeft 0.4s ease;
@@ -535,7 +535,7 @@ body {
   position: fixed;
   inset: 0;
   z-index: 150;
-  background: rgba(26,21,32,0.7);
+  background: rgba(74,58,68,0.4);
 }
 .mobile-backdrop.show { display: block; }
 
@@ -695,7 +695,7 @@ body {
 </div>
 
 <script>
-const STATUS_COLORS = {satisfied:'#a8d8a8', normal:'#7fdcd0', deficit:'#ff8a8a'};
+const STATUS_COLORS = {satisfied:'#66bb6a', normal:'#4db6ac', deficit:'#ef5350'};
 let sending = false;
 
 // ─── 手机端侧边栏切换 ───
