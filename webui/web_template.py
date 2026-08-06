@@ -655,6 +655,7 @@ body {
     <div class="dot"></div>
     <span id="status-text">连接中...</span>
     <button id="tts-toggle-btn" class="tts-btn" onclick="toggleTTS()" title="开关自动语音">🔇</button>
+    <button id="conv-toggle-btn" class="tts-btn" onclick="toggleConversation()" title="实时语音对话">🎙️</button>
   </div>
   <div class="messages" id="messages"></div>
 
@@ -1059,6 +1060,212 @@ async function transcribeAudio(blob, mimeType) {
   } finally {
     btn.classList.remove('transcribing');
     btn.textContent = '🎤';
+  }
+}
+
+// ─── 实时语音对话模式（VAD） ──────────────────
+let convMode = false;
+let convStream = null;
+let convAudioCtx = null;
+let convAnalyser = null;
+let convRecorder = null;
+let convChunks = [];
+let convIsSpeaking = false;
+let convLastSpeech = 0;
+let convVadTimer = null;
+let convPaused = false; // AI回复期间暂停
+let convMime = '';
+
+// VAD参数
+const VAD_SPEECH_THRESHOLD = 0.015;  // RMS > 此值 = 有人在说话
+const VAD_SILENCE_MS = 1500;         // 静音超过此时间 = 说完了
+const VAD_CHECK_INTERVAL = 100;      // 检测间隔ms
+const VAD_MIN_SPEECH_MS = 300;       // 最短说话时间，低于此忽略
+const VAD_RESUME_DELAY = 800;        // AI回复后等多久再恢复监听
+
+async function toggleConversation() {
+  const btn = document.getElementById('conv-toggle-btn');
+  if (convMode) {
+    // 关闭
+    convMode = false;
+    stopConvVAD();
+    btn.classList.remove('active');
+    btn.textContent = '🎙️';
+    document.getElementById('status-text').textContent = '在线';
+  } else {
+    // 检查ASR是否可用
+    const ok = await checkASR();
+    if (!ok) {
+      alert('语音识别未启用，无法开启实时对话\\n请在config.json中配置 asr.enabled = true');
+      return;
+    }
+    convMode = true;
+    btn.classList.add('active');
+    btn.textContent = '🔴';
+    await startConvVAD();
+  }
+}
+
+async function startConvVAD() {
+  try {
+    convStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,   // 回声消除（关键：防止TTS声音被识别）
+        noiseSuppression: true,   // 降噪
+        autoGainControl: true,    // 自动增益
+      }
+    });
+
+    convAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const source = convAudioCtx.createMediaStreamSource(convStream);
+    convAnalyser = convAudioCtx.createAnalyser();
+    convAnalyser.fftSize = 512;
+    convAnalyser.smoothingTimeConstant = 0.3;
+    source.connect(convAnalyser);
+
+    // 选择录音格式
+    convMime = 'audio/webm;codecs=opus';
+    if (!MediaRecorder.isTypeSupported(convMime)) {
+      convMime = 'audio/webm';
+      if (!MediaRecorder.isTypeSupported(convMime)) {
+        convMime = 'audio/mp4';
+        if (!MediaRecorder.isTypeSupported(convMime)) convMime = '';
+      }
+    }
+
+    document.getElementById('status-text').textContent = '🎤 正在聆听...';
+    convPaused = false;
+    convVadTimer = setInterval(vadCheck, VAD_CHECK_INTERVAL);
+
+  } catch(e) {
+    console.error('VAD启动失败:', e);
+    alert('无法访问麦克风: ' + e.message);
+    convMode = false;
+    const btn = document.getElementById('conv-toggle-btn');
+    btn.classList.remove('active');
+    btn.textContent = '🎙️';
+  }
+}
+
+function stopConvVAD() {
+  if (convVadTimer) {
+    clearInterval(convVadTimer);
+    convVadTimer = null;
+  }
+  if (convRecorder && convRecorder.state !== 'inactive') {
+    convRecorder.stop();
+  }
+  if (convStream) {
+    convStream.getTracks().forEach(t => t.stop());
+    convStream = null;
+  }
+  if (convAudioCtx) {
+    try { convAudioCtx.close(); } catch(e) {}
+    convAudioCtx = null;
+  }
+  convIsSpeaking = false;
+  convPaused = false;
+}
+
+function vadCheck() {
+  if (!convMode || convPaused || !convAnalyser) return;
+
+  const buffer = new Uint8Array(convAnalyser.frequencyBinCount);
+  convAnalyser.getByteTimeDomainData(buffer);
+
+  // 计算RMS（音量有效值）
+  let sum = 0;
+  for (let i = 0; i < buffer.length; i++) {
+    const v = (buffer[i] - 128) / 128;
+    sum += v * v;
+  }
+  const rms = Math.sqrt(sum / buffer.length);
+
+  const now = Date.now();
+
+  if (rms > VAD_SPEECH_THRESHOLD) {
+    // 检测到声音
+    if (!convIsSpeaking) {
+      // 开始说话
+      convIsSpeaking = true;
+      convLastSpeech = now;
+      startConvRecording();
+      document.getElementById('status-text').textContent = '🎙️ 正在说话...';
+    }
+    convLastSpeech = now;
+  } else if (convIsSpeaking && (now - convLastSpeech) > VAD_SILENCE_MS) {
+    // 静音超时 = 说完了
+    convIsSpeaking = false;
+    stopConvAndTranscribe();
+  }
+}
+
+function startConvRecording() {
+  convChunks = [];
+  try {
+    convRecorder = new MediaRecorder(convStream, convMime ? { mimeType: convMime } : undefined);
+    convRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) convChunks.push(e.data);
+    };
+    convRecorder.onstop = async () => {
+      const blob = new Blob(convChunks, { type: convMime || 'audio/webm' });
+      const duration = convLastSpeech > 0 ? Date.now() - convLastSpeech : 0;
+
+      // 太短可能是噪声，忽略
+      if (blob.size < 1000) {
+        document.getElementById('status-text').textContent = '🎤 正在聆听...';
+        return;
+      }
+
+      // 暂停VAD，开始转写
+      convPaused = true;
+      document.getElementById('status-text').textContent = '⏳ 识别中...';
+
+      try {
+        const ext = convMime.includes('webm') ? 'webm' : (convMime.includes('mp4') ? 'mp4' : 'wav');
+        const formData = new FormData();
+        formData.append('audio', blob, `recording.${ext}`);
+
+        const resp = await fetch('/api/asr', { method: 'POST', body: formData });
+        const data = await resp.json();
+
+        if (data.text && data.text.trim()) {
+          // 自动发送
+          document.getElementById('input').value = data.text;
+          document.getElementById('status-text').textContent = '💬 思考中...';
+          await send();
+          // send()完成后sending变回false，等待一会儿再恢复监听
+          setTimeout(() => {
+            if (convMode) {
+              convPaused = false;
+              document.getElementById('status-text').textContent = '🎤 正在聆听...';
+            }
+          }, VAD_RESUME_DELAY);
+        } else {
+          // 空文本，直接恢复
+          if (convMode) {
+            convPaused = false;
+            document.getElementById('status-text').textContent = '🎤 正在聆听...';
+          }
+        }
+      } catch(e) {
+        console.error('VAD转写失败:', e);
+        if (convMode) {
+          convPaused = false;
+          document.getElementById('status-text').textContent = '🎤 正在聆听...';
+        }
+      }
+    };
+    convRecorder.start();
+  } catch(e) {
+    console.error('录音启动失败:', e);
+    convIsSpeaking = false;
+  }
+}
+
+function stopConvAndTranscribe() {
+  if (convRecorder && convRecorder.state !== 'inactive') {
+    convRecorder.stop();
   }
 }
 
