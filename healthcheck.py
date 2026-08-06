@@ -39,6 +39,8 @@ EXPECTED_FILES = {
     "arc_light.py": 6000,
     # P0.16 活体约束层
     "feedback_loop.py": 12000,
+    # P0.58 能听（ASR）
+    "asr_provider.py": 8000,
     # P0.17 体细胞
     "somatic_cells.py": 10000,
     # P0.18 事件轨迹
@@ -103,6 +105,7 @@ EXPECTED_SYMBOLS = {
     "entity_graph": ["EntityGraph"],
     "arc_light": ["ArcLightSystem"],
     "feedback_loop": ["FeedbackLoop"],
+    "asr_provider": ["ASREngine", "WhisperASRProvider", "ASRProviderFactory"],
     "somatic_cells": ["SomaticCellSystem"],
     "event_trajectory": ["EventTrajectory"],
     "observer": ["Observer", "RunFrame"],
