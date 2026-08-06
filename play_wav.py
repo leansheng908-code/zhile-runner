@@ -1,104 +1,100 @@
 #!/usr/bin/env python3
-"""WAV播放器 - 修正流式WAV头部 + MCI播放"""
+"""WAV播放器 - 修正流式WAV头部 + 音量调节 + MCI播放"""
 import sys
 import os
 import ctypes
 import struct
-import tempfile
+import array
 
-def fix_wav_header(path):
+def fix_wav_header(data):
     """检查并修正WAV头部data chunk size（流式输出可能写0）"""
-    with open(path, 'rb') as f:
-        data = f.read()
-    
     if len(data) < 44:
-        return path  # 太小，不处理
-    
+        return data
+    fixed = bytearray(data)
     riff_size = struct.unpack('<I', data[4:8])[0]
     data_size = struct.unpack('<I', data[40:44])[0]
     actual_data = len(data) - 44
-    
-    need_fix = False
-    fixed = bytearray(data)
-    
-    # 修正data chunk size
     if data_size == 0 or data_size != actual_data:
         fixed[40:44] = struct.pack('<I', actual_data)
-        need_fix = True
-    
-    # 修正RIFF size
     expected_riff = len(data) - 8
     if riff_size != expected_riff:
         fixed[4:8] = struct.pack('<I', expected_riff)
-        need_fix = True
-    
-    if need_fix:
-        # 写到临时文件
-        tmp = path + '.fixed.wav'
-        with open(tmp, 'wb') as f:
-            f.write(fixed)
-        print(f"[play_wav] 修正WAV头部: data_size {data_size}→{actual_data}, riff_size {riff_size}→{expected_riff}")
-        return tmp
-    
-    return path
+    return bytes(fixed)
 
-def play(path):
+def apply_volume(data, volume):
+    """调节16位PCM WAV音量 (-100~+100)"""
+    if volume == 0 or len(data) < 44:
+        return data
+    factor = 1.0 + volume / 100.0  # -100→0.0, 0→1.0, +100→2.0
+    if factor <= 0:
+        # 静音：保留头部，清零数据
+        return data[:44] + b'\x00' * (len(data) - 44)
+    # 解析音频参数
+    bits = struct.unpack('<H', data[34:36])[0]
+    if bits != 16:
+        return data  # 非16位PCM不支持
+    # 提取音频数据（跳过44字节头部）
+    audio_data = array.array('h')
+    audio_data.frombytes(data[44:])
+    # 缩放
+    for i in range(len(audio_data)):
+        val = int(audio_data[i] * factor)
+        if val > 32767:
+            val = 32767
+        elif val < -32768:
+            val = -32768
+        audio_data[i] = val
+    return data[:44] + audio_data.tobytes()
+
+def play(path, volume=0):
     if not os.path.exists(path):
         print(f"[play_wav] 文件不存在: {path}")
         return False
     
-    sz = os.path.getsize(path)
-    print(f"[play_wav] 文件: {path} ({sz} bytes)")
+    with open(path, 'rb') as f:
+        raw = f.read()
     
     # 修正WAV头部
-    play_path = fix_wav_header(path)
+    raw = fix_wav_header(raw)
     
-    # MCI播放（waveaudio类型对WAV更准确）
+    # 音量调节
+    if volume != 0:
+        raw = apply_volume(raw, volume)
+    
+    # 写到临时文件
+    tmp = path + '.play.wav'
+    with open(tmp, 'wb') as f:
+        f.write(raw)
+    
     w = ctypes.windll.winmm
     alias = "zhile_tts"
     
-    for mci_type in ['waveaudio', 'mpegvideo', '']:
-        try:
-            if mci_type:
-                open_cmd = f'open "{play_path}" type {mci_type} alias {alias}'
-            else:
-                open_cmd = f'open "{play_path}" alias {alias}'
-            ret = w.mciSendStringW(open_cmd, None, 0, None)
-            if ret != 0:
-                continue
-            
-            buf = ctypes.create_unicode_buffer(256)
-            w.mciSendStringW(f'status {alias} length', buf, 256, None)
-            length = buf.value
-            print(f"[play_wav] MCI(type={mci_type or 'auto'}) 时长={length}")
-            
-            if length == '0':
-                w.mciSendStringW(f'close {alias}', None, 0, None)
-                continue
-            
-            ret2 = w.mciSendStringW(f'play {alias} wait', None, 0, None)
-            w.mciSendStringW(f'close {alias}', None, 0, None)
-            
-            if ret2 == 0:
-                print(f"[play_wav] ✅ 播放成功!")
-                # 清理临时文件
-                if play_path != path and os.path.exists(play_path):
-                    os.remove(play_path)
-                return True
-        except Exception as e:
-            print(f"[play_wav] MCI异常: {e}")
-        finally:
-            w.mciSendStringW(f'close {alias}', None, 0, None)
-    
-    # 清理临时文件
-    if play_path != path and os.path.exists(play_path):
-        os.remove(play_path)
-    print(f"[play_wav] ❌ 所有MCI类型失败")
-    return False
+    try:
+        # waveaudio对WAV更准确
+        ret = w.mciSendStringW(f'open "{tmp}" type waveaudio alias {alias}', None, 0, None)
+        if ret != 0:
+            ret = w.mciSendStringW(f'open "{tmp}" type mpegvideo alias {alias}', None, 0, None)
+        if ret != 0:
+            ret = w.mciSendStringW(f'open "{tmp}" alias {alias}', None, 0, None)
+        if ret != 0:
+            print(f"[play_wav] open failed: {ret}")
+            return False
+        
+        ret2 = w.mciSendStringW(f'play {alias} wait', None, 0, None)
+        w.mciSendStringW(f'close {alias}', None, 0, None)
+        return ret2 == 0
+    except Exception as e:
+        print(f"[play_wav] error: {e}")
+        return False
+    finally:
+        w.mciSendStringW(f'close {alias}', None, 0, None)
+        if os.path.exists(tmp):
+            os.remove(tmp)
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python play_wav.py <wav_path>")
+        print("Usage: python play_wav.py <wav_path> [volume]")
         sys.exit(1)
-    ok = play(sys.argv[1])
+    vol = int(sys.argv[2]) if len(sys.argv) > 2 else 0
+    ok = play(sys.argv[1], vol)
     sys.exit(0 if ok else 1)
