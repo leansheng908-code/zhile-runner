@@ -1,7 +1,8 @@
 """
-Web界面HTML模板 — 知乐运行器Phase 4
+Web界面HTML模板 — 知乐运行器 P0.38 Phase 1.5 UI猫娘化
 
-暗色主题，猫耳粉青配色，聊天界面+PSI生命体征面板
+暖色猫娘美学主题，猫耳装饰+爪印动效+完整命令面板
+聊天界面 + PSI生命体征面板 + 40+命令全映射
 """
 
 PAGE_HTML = r"""<!DOCTYPE html>
@@ -12,19 +13,25 @@ PAGE_HTML = r"""<!DOCTYPE html>
 <title>知乐 · 本地运行器</title>
 <style>
 :root {
-  --bg: #0f0f1e;
-  --bg-card: #1a1a2e;
-  --bg-input: #16213e;
-  --pink: #ff6b9d;
-  --pink-dim: #c4567a;
-  --cyan: #4ecdc4;
-  --cyan-dim: #3a9b94;
-  --yellow: #ffd93d;
-  --green: #6bcf7f;
-  --red: #ff6b6b;
-  --text: #e0e0e0;
-  --text-dim: #8888aa;
-  --border: #2a2a4a;
+  /* ─── 暖色猫娘色彩系统 ─── */
+  --bg: #1a1520;            /* 深暖褐 */
+  --bg-card: #251e2a;       /* 卡片暖灰 */
+  --bg-input: #2a2230;      /* 暖深紫输入框 */
+  --pink: #ff8fab;           /* 暖橙粉 */
+  --pink-dim: #d4738a;       /* 暗橙粉 */
+  --pink-glow: rgba(255,143,171,0.15);
+  --cream: #fff5f7;          /* 奶白 */
+  --cyan: #7fdcd0;           /* 薄青 */
+  --cyan-dim: #5fb3a8;       /* 暗薄青 */
+  --yellow: #ffd6a0;         /* 柔黄 */
+  --green: #a8d8a8;           /* 暖绿 */
+  --red: #ff8a8a;            /* 暖红 */
+  --text: #f0e8e8;           /* 暖白 */
+  --text-dim: #9a8e9a;       /* 暗灰 */
+  --border: #3a3040;         /* 暖暗灰 */
+  --radius: 16px;
+  --shadow: 0 4px 16px rgba(255,143,171,0.08);
+  --shadow-hover: 0 6px 24px rgba(255,143,171,0.15);
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
@@ -36,6 +43,35 @@ body {
   overflow: hidden;
 }
 
+/* ─── 猫尾巴装饰（侧边栏顶部） ─── */
+.cat-tail {
+  position: absolute;
+  top: 0;
+  right: -6px;
+  width: 60px;
+  height: 50px;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 10;
+}
+.cat-tail::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  width: 36px;
+  height: 36px;
+  border: 3px solid transparent;
+  border-right-color: var(--pink);
+  border-radius: 50%;
+  animation: tailWag 4s ease-in-out infinite;
+  transform-origin: bottom left;
+}
+@keyframes tailWag {
+  0%, 100% { transform: rotate(-20deg); }
+  50% { transform: rotate(15deg); }
+}
+
 /* ─── 侧边栏 ─── */
 .sidebar {
   width: 280px;
@@ -44,193 +80,456 @@ body {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  position: relative;
 }
+
+/* ─── 头像区域（猫耳装饰） ─── */
 .sidebar-header {
-  padding: 20px;
+  padding: 24px 20px 16px;
   text-align: center;
   border-bottom: 1px solid var(--border);
+  position: relative;
 }
-.sidebar-header .avatar-emoji {
-  font-size: 48px; margin-bottom: 4px;
-  display: inline-block; transition: transform 0.3s;
+.avatar-wrapper {
+  display: inline-block;
+  position: relative;
+  margin-bottom: 4px;
+}
+.avatar-wrapper::before,
+.avatar-wrapper::after {
+  content: '';
+  position: absolute;
+  top: -14px;
+  width: 0;
+  height: 0;
+  border-left: 12px solid transparent;
+  border-right: 12px solid transparent;
+  border-bottom: 20px solid var(--pink);
+  filter: drop-shadow(0 1px 2px rgba(255,143,171,0.3));
+}
+.avatar-wrapper::before {
+  left: -18px;
+  transform: rotate(-18deg);
+  animation: earWiggleL 3s ease-in-out infinite;
+}
+.avatar-wrapper::after {
+  right: -18px;
+  transform: rotate(18deg);
+  animation: earWiggleR 3s ease-in-out infinite;
+}
+@keyframes earWiggleL {
+  0%, 100% { transform: rotate(-18deg); }
+  50% { transform: rotate(-8deg); }
+}
+@keyframes earWiggleR {
+  0%, 100% { transform: rotate(18deg); }
+  50% { transform: rotate(8deg); }
+}
+.avatar-emoji {
+  font-size: 48px;
+  display: inline-block;
+  transition: transform 0.3s;
   animation: avatarBounce 2s ease-in-out infinite;
 }
 @keyframes avatarBounce {
-  0%,100% { transform: translateY(0); }
+  0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-4px); }
 }
-.sidebar-header .avatar-label {
-  font-size: 11px; color: var(--cyan); margin-bottom: 2px;
+.avatar-label {
+  font-size: 11px;
+  color: var(--cyan);
+  margin-bottom: 2px;
 }
-.sidebar-header h1 { font-size: 18px; color: var(--pink); }
-.sidebar-header .ver { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+.sidebar-header h1 {
+  font-size: 18px;
+  color: var(--pink);
+  text-shadow: 0 0 12px rgba(255,143,171,0.3);
+}
+.sidebar-header .ver {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
 
+/* ─── PSI 面板 ─── */
 .psi-panel {
   padding: 16px;
   flex: 1;
   overflow-y: auto;
 }
 .psi-panel h2 {
-  font-size: 12px; color: var(--text-dim);
-  text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--pink);
+  text-transform: none;
+  letter-spacing: 0.5px;
+  margin-bottom: 12px;
 }
 .psi-item {
   margin-bottom: 14px;
 }
 .psi-label {
-  display: flex; justify-content: space-between;
-  font-size: 13px; margin-bottom: 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  margin-bottom: 4px;
 }
 .psi-label .name { color: var(--text); }
+.psi-label .name::before {
+  content: '🐾 ';
+  font-size: 10px;
+}
 .psi-label .status { font-size: 11px; }
+
+/* PSI 进度条 — 猫爪渐变填充 */
 .psi-bar {
-  height: 8px; background: var(--bg-input); border-radius: 4px;
-  overflow: hidden; position: relative;
+  height: 10px;
+  background: var(--bg-input);
+  border-radius: 8px;
+  overflow: hidden;
+  position: relative;
+  border: 1px solid var(--border);
 }
 .psi-fill {
-  height: 100%; border-radius: 4px;
-  transition: width 0.5s ease, background 0.3s;
+  height: 100%;
+  border-radius: 8px;
+  transition: width 0.5s ease;
+  position: relative;
+  background-size: 24px 24px;
+  background-image: radial-gradient(circle, rgba(255,255,255,0.15) 2px, transparent 2px);
+  background-repeat: repeat;
+  animation: psiFlow 2s linear infinite;
 }
-.psi-fill.satisfied { background: var(--green); }
-.psi-fill.normal { background: var(--cyan); }
-.psi-fill.deficit { background: var(--red); }
+@keyframes psiFlow {
+  0% { background-position: 0 0; }
+  100% { background-position: 24px 0; }
+}
+.psi-fill.satisfied {
+  background-color: var(--green);
+  background-image: radial-gradient(circle, rgba(255,255,255,0.2) 2px, transparent 2px), linear-gradient(90deg, var(--green), var(--cyan));
+}
+.psi-fill.normal {
+  background-color: var(--cyan);
+  background-image: radial-gradient(circle, rgba(255,255,255,0.15) 2px, transparent 2px), linear-gradient(90deg, var(--cyan-dim), var(--cyan));
+}
+.psi-fill.deficit {
+  background-color: var(--red);
+  background-image: radial-gradient(circle, rgba(255,255,255,0.15) 2px, transparent 2px), linear-gradient(90deg, var(--red), var(--pink-dim));
+}
+
+/* 意识帧 ✨ 装饰 */
 .psi-frame {
-  margin-top: 16px; padding: 8px 12px;
-  background: var(--bg-input); border-radius: 6px;
-  font-size: 12px; color: var(--text-dim);
+  margin-top: 16px;
+  padding: 10px 14px;
+  background: var(--bg-input);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
+.psi-frame::before {
+  content: '✨';
+  font-size: 14px;
+}
+
+/* ─── 侧边栏底部 ─── */
 .sidebar-footer {
-  padding: 12px 16px; border-top: 1px solid var(--border);
-  font-size: 11px; color: var(--text-dim);
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-dim);
 }
 .btn-group { display: flex; gap: 6px; margin-bottom: 8px; }
 .btn {
-  flex: 1; padding: 6px 8px; border: 1px solid var(--border);
-  background: var(--bg-input); color: var(--text-dim);
-  border-radius: 4px; cursor: pointer; font-size: 11px;
+  flex: 1;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-dim);
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 11px;
   transition: all 0.2s;
 }
-.btn:hover { border-color: var(--pink); color: var(--pink); }
+.btn:hover {
+  border-color: var(--pink);
+  color: var(--pink);
+  box-shadow: var(--shadow);
+}
 
 /* ─── 聊天区 ─── */
 .chat-area {
-  flex: 1; display: flex; flex-direction: column;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
 }
 .chat-header {
-  padding: 12px 20px; border-bottom: 1px solid var(--border);
-  display: flex; align-items: center; gap: 8px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .chat-header .dot {
-  width: 8px; height: 8px; border-radius: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
   background: var(--green);
+  box-shadow: 0 0 8px var(--green);
 }
 .chat-header span { font-size: 14px; color: var(--text-dim); }
 
+/* ─── 消息区 ─── */
 .messages {
-  flex: 1; overflow-y: auto; padding: 20px;
-  display: flex; flex-direction: column; gap: 12px;
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
+
+/* ─── 聊天气泡 + 猫耳装饰 ─── */
 .msg {
-  max-width: 75%; padding: 10px 14px; border-radius: 12px;
-  font-size: 14px; line-height: 1.6; word-break: break-word;
-  white-space: pre-wrap; animation: fadeIn 0.3s;
+  max-width: 75%;
+  padding: 10px 16px;
+  border-radius: var(--radius);
+  font-size: 14px;
+  line-height: 1.6;
+  word-break: break-word;
+  white-space: pre-wrap;
+  position: relative;
+  box-shadow: var(--shadow);
 }
-@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; } }
-.msg.user {
-  align-self: flex-end;
-  background: var(--cyan-dim); color: #fff;
-  border-bottom-right-radius: 4px;
-}
+
+/* 知乐消息 — 左对齐 + 左上猫耳三角 */
 .msg.zhile {
   align-self: flex-start;
-  background: var(--bg-card); border: 1px solid var(--border);
-  border-bottom-left-radius: 4px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 6px;
+  animation: slideInLeft 0.4s ease;
 }
+.msg.zhile::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  width: 0;
+  height: 0;
+  border-left: 14px solid var(--pink);
+  border-top: 14px solid var(--pink);
+  border-right: 14px solid transparent;
+  border-bottom: 14px solid transparent;
+  border-top-left-radius: var(--radius);
+  filter: drop-shadow(0 -1px 1px rgba(255,143,171,0.2));
+}
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-10px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* 用户消息 — 右对齐 + 暖橙渐变 */
+.msg.user {
+  align-self: flex-end;
+  background: linear-gradient(135deg, var(--pink) 0%, var(--pink-dim) 100%);
+  color: var(--cream);
+  border-bottom-right-radius: 4px;
+  animation: slideInRight 0.4s ease;
+}
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(10px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* 系统消息 — 居中虚线框 + 🌙 */
 .msg.system {
-  align-self: center; background: transparent;
-  color: var(--text-dim); font-size: 12px;
-  border: 1px dashed var(--border); border-radius: 6px;
+  align-self: center;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  padding: 8px 16px;
+  max-width: 90%;
 }
+.msg.system::before {
+  content: '🌙 ';
+}
+
+/* 打字动画 — 🐾🐾🐾 */
 .typing {
-  align-self: flex-start; color: var(--text-dim);
-  font-size: 13px; padding: 10px 14px;
+  align-self: flex-start;
+  color: var(--text-dim);
+  font-size: 13px;
+  padding: 4px 0;
 }
 .typing span {
-  display: inline-block; animation: blink 1.4s infinite;
+  display: inline-block;
+  animation: pawBlink 1.4s infinite;
+  margin-right: 2px;
 }
 .typing span:nth-child(2) { animation-delay: 0.2s; }
 .typing span:nth-child(3) { animation-delay: 0.4s; }
-@keyframes blink { 0%,60%,100% { opacity: 0.3; } 30% { opacity: 1; } }
+@keyframes pawBlink {
+  0%, 60%, 100% { opacity: 0.3; transform: scale(0.9); }
+  30% { opacity: 1; transform: scale(1.1); }
+}
 
 /* ─── 命令面板 ─── */
 .cmd-panel {
-  max-height: 0; overflow: hidden; transition: max-height 0.3s ease;
-  border-top: 1px solid var(--border); background: var(--bg-card);
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+  border-top: 1px solid var(--border);
+  background: var(--bg-card);
 }
-.cmd-panel.open { max-height: 320px; overflow-y: auto; }
+.cmd-panel.open {
+  max-height: 480px;
+  overflow-y: auto;
+}
 .cmd-panel-inner { padding: 12px 20px; }
 .cmd-group-title {
-  font-size: 11px; color: var(--text-dim); text-transform: uppercase;
-  letter-spacing: 1px; margin: 8px 0 6px;
+  font-size: 12px;
+  color: var(--pink);
+  letter-spacing: 0.5px;
+  margin: 10px 0 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(255,143,171,0.1);
 }
+.cmd-group-title:first-child { margin-top: 0; }
 .cmd-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
   gap: 6px;
 }
 .cmd-btn {
-  padding: 8px 10px; border: 1px solid var(--border);
-  background: var(--bg-input); color: var(--text);
-  border-radius: 6px; cursor: pointer; font-size: 12px;
-  transition: all 0.2s; text-align: center;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s;
+  text-align: center;
 }
 .cmd-btn:hover {
-  border-color: var(--pink); color: var(--pink);
-  background: rgba(255,107,157,0.08);
+  border-color: var(--pink);
+  color: var(--pink);
+  background: var(--pink-glow);
+  box-shadow: 0 0 12px rgba(255,143,171,0.2);
+  transform: translateY(-1px);
 }
-.cmd-btn .cmd-icon { display: block; font-size: 16px; margin-bottom: 2px; }
-.cmd-btn .cmd-label { font-size: 11px; color: var(--text-dim); }
+.cmd-btn .cmd-icon {
+  display: block;
+  font-size: 16px;
+  margin-bottom: 2px;
+}
+.cmd-btn .cmd-label {
+  font-size: 11px;
+  color: var(--text-dim);
+}
 .cmd-btn:hover .cmd-label { color: var(--pink); }
 
+/* ─── 输入区 ─── */
 .input-area {
-  padding: 12px 20px; border-top: 1px solid var(--border);
-  display: flex; gap: 8px; align-items: flex-end;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
 }
 .input-area textarea {
-  flex: 1; background: var(--bg-input); border: 1px solid var(--border);
-  border-radius: 8px; padding: 10px 12px; color: var(--text);
-  font-size: 14px; font-family: inherit; resize: none;
-  max-height: 120px; min-height: 42px; line-height: 1.5;
+  flex: 1;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  resize: none;
+  max-height: 120px;
+  min-height: 46px;
+  line-height: 1.5;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 .input-area textarea:focus {
-  outline: none; border-color: var(--pink);
+  outline: none;
+  border-color: var(--pink);
+  box-shadow: 0 0 0 3px rgba(255,143,171,0.1);
 }
-.input-area button {
-  padding: 10px 18px; background: var(--pink); color: #fff;
-  border: none; border-radius: 8px; cursor: pointer;
-  font-size: 14px; font-weight: 600; transition: all 0.2s;
+.input-area button#send-btn {
+  padding: 12px 20px;
+  background: linear-gradient(135deg, var(--pink) 0%, var(--pink-dim) 100%);
+  color: var(--cream);
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.2s;
+  box-shadow: var(--shadow);
 }
-.input-area button:hover { background: var(--pink-dim); }
-.input-area button:disabled { opacity: 0.5; cursor: not-allowed; }
+.input-area button#send-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-hover);
+}
+.input-area button#send-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+/* 命令面板切换按钮 — 🐾 */
 .input-area .cmd-toggle {
-  padding: 10px 14px; background: var(--bg-input); color: var(--cyan);
-  border: 1px solid var(--border); font-size: 18px;
+  padding: 10px 14px;
+  background: var(--bg-input);
+  color: var(--cyan);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 18px;
+  transition: all 0.3s;
 }
-.input-area .cmd-toggle:hover { border-color: var(--cyan); background: rgba(78,205,196,0.08); }
-.input-area .cmd-toggle.active { background: var(--cyan); color: var(--bg); border-color: var(--cyan); }
+.input-area .cmd-toggle:hover {
+  border-color: var(--cyan);
+  background: rgba(127,220,208,0.08);
+}
+.input-area .cmd-toggle.active {
+  background: var(--cyan);
+  color: var(--bg);
+  border-color: var(--cyan);
+  transform: rotate(15deg);
+}
 
 /* ─── 手机端切换按钮 ─── */
 .mobile-toggle {
   display: none;
-  position: fixed; top: 10px; left: 10px; z-index: 200;
-  width: 40px; height: 40px; border-radius: 50%;
-  background: var(--bg-card); border: 1px solid var(--border);
-  color: var(--pink); font-size: 20px; cursor: pointer;
-  align-items: center; justify-content: center;
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 200;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--pink);
+  font-size: 20px;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
 }
 .mobile-backdrop {
-  display: none; position: fixed; inset: 0; z-index: 150;
-  background: rgba(0,0,0,0.5);
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  background: rgba(26,21,32,0.7);
 }
 .mobile-backdrop.show { display: block; }
 
@@ -238,8 +537,11 @@ body {
 @media (max-width: 768px) {
   .mobile-toggle { display: flex; }
   .sidebar {
-    position: fixed; left: 0; top: 0; bottom: 0; z-index: 160;
-    transform: translateX(-100%); transition: transform 0.3s ease;
+    position: fixed;
+    left: 0; top: 0; bottom: 0;
+    z-index: 160;
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
     width: 260px;
   }
   .sidebar.open { transform: translateX(0); }
@@ -247,11 +549,16 @@ body {
   .msg { max-width: 90%; }
 }
 
-/* ─── 滚动条 ─── */
+/* ─── 暖色滚动条 ─── */
 ::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--pink-dim);
+}
 </style>
 </head>
 <body>
@@ -262,17 +569,24 @@ body {
 
 <!-- 侧边栏 -->
 <div class="sidebar" id="sidebar">
+  <!-- 猫尾巴装饰 -->
+  <div class="cat-tail"></div>
+
   <div class="sidebar-header">
-    <div class="avatar-emoji" id="avatar-emoji">🐱</div>
+    <div class="avatar-wrapper">
+      <div class="avatar-emoji" id="avatar-emoji">🐱</div>
+    </div>
     <div class="avatar-label" id="avatar-label">日常</div>
     <h1>知乐</h1>
     <div class="ver" id="ver">本地运行器</div>
   </div>
+
   <div class="psi-panel">
-    <h2>内在状态 PSI</h2>
+    <h2>🐾 内在状态 PSI</h2>
     <div id="psi-list"></div>
     <div class="psi-frame" id="psi-frame">意识帧: 0</div>
   </div>
+
   <div class="sidebar-footer">
     <div class="btn-group">
       <button class="btn" onclick="doAction('diary')">写日记</button>
@@ -297,29 +611,77 @@ body {
   <!-- 命令面板 -->
   <div class="cmd-panel" id="cmd-panel">
     <div class="cmd-panel-inner">
-      <div class="cmd-group-title">状态查看</div>
+
+      <!-- 📊 状态查看组 -->
+      <div class="cmd-group-title">📊 状态查看</div>
       <div class="cmd-grid">
         <button class="cmd-btn" onclick="runCmd('/status')"><span class="cmd-icon">📊</span><span class="cmd-label">系统状态</span></button>
         <button class="cmd-btn" onclick="runCmd('/psi')"><span class="cmd-icon">💗</span><span class="cmd-label">内在状态</span></button>
-        <button class="cmd-btn" onclick="runCmd('/destiny')"><span class="cmd-icon">🔮</span><span class="cmd-label">个人命格</span></button>
-        <button class="cmd-btn" onclick="runCmd('/destiny list')"><span class="cmd-icon">📜</span><span class="cmd-label">大运序列</span></button>
-        <button class="cmd-btn" onclick="runCmd('/memory')"><span class="cmd-icon">🧠</span><span class="cmd-label">记忆库</span></button>
-        <button class="cmd-btn" onclick="runCmd('/desire')"><span class="cmd-icon">💫</span><span class="cmd-label">欲望引擎</span></button>
         <button class="cmd-btn" onclick="runCmd('/diag')"><span class="cmd-icon">🔧</span><span class="cmd-label">系统诊断</span></button>
         <button class="cmd-btn" onclick="runCmd('/free')"><span class="cmd-icon">🕊️</span><span class="cmd-label">自由五层</span></button>
+        <button class="cmd-btn" onclick="runCmd('/destiny')"><span class="cmd-icon">🔮</span><span class="cmd-label">个人命格</span></button>
+        <button class="cmd-btn" onclick="runCmd('/destiny list')"><span class="cmd-icon">📜</span><span class="cmd-label">大运序列</span></button>
       </div>
-      <div class="cmd-group-title">操作</div>
+
+      <!-- 🧠 记忆思维组 -->
+      <div class="cmd-group-title">🧠 记忆思维</div>
+      <div class="cmd-grid">
+        <button class="cmd-btn" onclick="runCmd('/memory')"><span class="cmd-icon">🧠</span><span class="cmd-label">记忆库</span></button>
+        <button class="cmd-btn" onclick="runCmd('/desire')"><span class="cmd-icon">💫</span><span class="cmd-label">思维间隙</span></button>
+        <button class="cmd-btn" onclick="runCmd('/forget')"><span class="cmd-icon">🌫️</span><span class="cmd-label">遗忘测试</span></button>
+      </div>
+
+      <!-- 🌱 成长进化组 -->
+      <div class="cmd-group-title">🌱 成长进化</div>
+      <div class="cmd-grid">
+        <button class="cmd-btn" onclick="runCmd('/growth')"><span class="cmd-icon">🌱</span><span class="cmd-label">成长扫描</span></button>
+        <button class="cmd-btn" onclick="runCmd('/grow')"><span class="cmd-icon">🌿</span><span class="cmd-label">手动成长</span></button>
+        <button class="cmd-btn" onclick="runCmd('/suggest')"><span class="cmd-icon">💡</span><span class="cmd-label">建议路线</span></button>
+        <button class="cmd-btn" onclick="runCmd('/roadmap')"><span class="cmd-icon">🗺️</span><span class="cmd-label">自研路线</span></button>
+        <button class="cmd-btn" onclick="runCmd('/code')"><span class="cmd-icon">💻</span><span class="cmd-label">代码执行</span></button>
+      </div>
+
+      <!-- 🔮 术数灵感组 -->
+      <div class="cmd-group-title">🔮 术数灵感</div>
+      <div class="cmd-grid">
+        <button class="cmd-btn" onclick="runCmd('/hexagram')"><span class="cmd-icon">☯️</span><span class="cmd-label">卦象查看</span></button>
+        <button class="cmd-btn" onclick="runCmd('/entities')"><span class="cmd-icon">📦</span><span class="cmd-label">实体库</span></button>
+        <button class="cmd-btn" onclick="runCmd('/events')"><span class="cmd-icon">📈</span><span class="cmd-label">事件轨迹</span></button>
+      </div>
+
+      <!-- 🔧 工具配置组 -->
+      <div class="cmd-group-title">🔧 工具配置</div>
+      <div class="cmd-grid">
+        <button class="cmd-btn" onclick="runCmd('/config')"><span class="cmd-icon">⚙️</span><span class="cmd-label">配置查看</span></button>
+        <button class="cmd-btn" onclick="runCmd('/provider')"><span class="cmd-icon">🔀</span><span class="cmd-label">模型切换</span></button>
+        <button class="cmd-btn" onclick="runCmd('/schedule')"><span class="cmd-icon">⏰</span><span class="cmd-label">定时任务</span></button>
+        <button class="cmd-btn" onclick="runCmd('/bgplugin')"><span class="cmd-icon">🔌</span><span class="cmd-label">后台插件</span></button>
+        <button class="cmd-btn" onclick="runCmd('/sleep')"><span class="cmd-icon">😴</span><span class="cmd-label">睡眠状态</span></button>
+      </div>
+
+      <!-- 🐾 技能插件组 -->
+      <div class="cmd-group-title">🐾 技能插件</div>
+      <div class="cmd-grid">
+        <button class="cmd-btn" onclick="runCmd('/skill')"><span class="cmd-icon">🎯</span><span class="cmd-label">技能管理</span></button>
+        <button class="cmd-btn" onclick="runCmd('/plugin')"><span class="cmd-icon">🧩</span><span class="cmd-label">插件管理</span></button>
+        <button class="cmd-btn" onclick="runCmd('/publish')"><span class="cmd-icon">📤</span><span class="cmd-label">发布技能</span></button>
+        <button class="cmd-btn" onclick="runCmd('/router')"><span class="cmd-icon">🛤️</span><span class="cmd-label">插件路由</span></button>
+      </div>
+
+      <!-- 快速操作 -->
+      <div class="cmd-group-title">⚡ 快速操作</div>
       <div class="cmd-grid">
         <button class="cmd-btn" onclick="runCmd('/news')"><span class="cmd-icon">📰</span><span class="cmd-label">有趣新闻</span></button>
-        <button class="cmd-btn" onclick="runCmd('/growth')"><span class="cmd-icon">🌱</span><span class="cmd-label">成长扫描</span></button>
         <button class="cmd-btn" onclick="runCmd('/save')"><span class="cmd-icon">💾</span><span class="cmd-label">保存会话</span></button>
         <button class="cmd-btn" onclick="runCmd('/clear')"><span class="cmd-icon">🧹</span><span class="cmd-label">清空对话</span></button>
+        <button class="cmd-btn" onclick="runCmd('/help')"><span class="cmd-icon">❓</span><span class="cmd-label">帮助</span></button>
       </div>
+
     </div>
   </div>
 
   <div class="input-area">
-    <button class="cmd-toggle" id="cmd-toggle" onclick="toggleCmdPanel()">⚡</button>
+    <button class="cmd-toggle" id="cmd-toggle" onclick="toggleCmdPanel()">🐾</button>
     <textarea id="input" placeholder="跟知乐说点什么..." rows="1"
       onkeydown="onKey(event)" oninput="autoResize(this)"></textarea>
     <button id="send-btn" onclick="send()">发送</button>
@@ -327,7 +689,7 @@ body {
 </div>
 
 <script>
-const STATUS_COLORS = {satisfied:'#6bcf7f', normal:'#4ecdc4', deficit:'#ff6b6b'};
+const STATUS_COLORS = {satisfied:'#a8d8a8', normal:'#7fdcd0', deficit:'#ff8a8a'};
 let sending = false;
 
 // ─── 手机端侧边栏切换 ───
@@ -379,7 +741,7 @@ function updatePSI(psi) {
     item.innerHTML = `
       <div class="psi-label">
         <span class="name">${name}</span>
-        <span class="status" style="color:${STATUS_COLORS[colorClass]}">${stat}</span>
+        <span class="status" style="color:${STATUS_COLORS[colorClass]}">${stat} 🐾</span>
       </div>
       <div class="psi-bar">
         <div class="psi-fill ${colorClass}" style="width:${filled/5*100}%"></div>
@@ -408,7 +770,13 @@ async function send() {
   if (!text || sending) return;
 
   sending = true;
-  document.getElementById('send-btn').disabled = true;
+  const sendBtn = document.getElementById('send-btn');
+  sendBtn.disabled = true;
+
+  // 发送按钮短暂变成🐾
+  const originalText = sendBtn.textContent;
+  sendBtn.textContent = '🐾';
+
   input.value = '';
   input.style.height = 'auto';
 
@@ -418,7 +786,7 @@ async function send() {
   const msgEl = addMsg('zhile', '');
   const typingEl = document.createElement('div');
   typingEl.className = 'typing';
-  typingEl.innerHTML = '<span>●</span><span>●</span><span>●</span>';
+  typingEl.innerHTML = '<span>🐾</span><span>🐾</span><span>🐾</span>';
   msgEl.appendChild(typingEl);
 
   try {
@@ -492,8 +860,10 @@ async function send() {
     msgEl.style.color = 'var(--red)';
   }
 
+  // 恢复发送按钮
+  sendBtn.textContent = originalText;
   sending = false;
-  document.getElementById('send-btn').disabled = false;
+  sendBtn.disabled = false;
   input.focus();
 }
 
