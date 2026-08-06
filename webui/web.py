@@ -736,6 +736,7 @@ class WebServer:
                 if "tts" not in self.core.config:
                     self.core.config["tts"] = {}
                 self.core.config["tts"]["voice"] = voice_name
+                self._save_tts_config()
                 from tts_provider import TTSEngine
                 self.core.tts = TTSEngine(self.core.config["tts"])
                 return f"✅ 音色已切换为: {voice_name}"
@@ -749,6 +750,7 @@ class WebServer:
                     if "tts" not in self.core.config:
                         self.core.config["tts"] = {}
                     self.core.config["tts"]["volume"] = vol
+                    self._save_tts_config()
                     from tts_provider import TTSEngine
                     self.core.tts = TTSEngine(self.core.config["tts"])
                     return f"✅ 音量已设为: {vol:+d}"
@@ -764,6 +766,7 @@ class WebServer:
                     if "tts" not in self.core.config:
                         self.core.config["tts"] = {}
                     self.core.config["tts"]["rate"] = r
+                    self._save_tts_config()
                     from tts_provider import TTSEngine
                     self.core.tts = TTSEngine(self.core.config["tts"])
                     return f"✅ 语速已设为: {r:+d}"
@@ -1038,6 +1041,18 @@ class WebServer:
             return send_file(audio_path, mimetype=mime)
         return jsonify({"error": "audio not found"}), 404
 
+    def _save_tts_config(self):
+        """将当前TTS配置持久化到config.json"""
+        try:
+            config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config.json")
+            with open(config_path, 'r', encoding='utf-8') as f:
+                cfg = json.load(f)
+            cfg["tts"] = self.core.config.get("tts", {})
+            with open(config_path, 'w', encoding='utf-8') as f:
+                json.dump(cfg, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[TTS] save config error: {e}", file=sys.stderr)
+
     def _tts_toggle(self):
         """切换自动语音开关（持久化到config.json）"""
         data = request.get_json() or {}
@@ -1045,18 +1060,7 @@ class WebServer:
         if "tts" not in self.core.config:
             self.core.config["tts"] = {}
         self.core.config["tts"]["auto_speak"] = enabled
-        # 持久化到config.json
-        try:
-            config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config.json")
-            with open(config_path, 'r', encoding='utf-8') as f:
-                cfg = json.load(f)
-            if "tts" not in cfg:
-                cfg["tts"] = {}
-            cfg["tts"]["auto_speak"] = enabled
-            with open(config_path, 'w', encoding='utf-8') as f:
-                json.dump(cfg, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f"[TTS] save config error: {e}", file=sys.stderr)
+        self._save_tts_config()
         return jsonify({"auto_speak": enabled})
 
     # ─── 启动 ─────────────────────────────────
