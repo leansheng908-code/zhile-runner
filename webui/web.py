@@ -947,7 +947,8 @@ class WebServer:
         safe_name = os.path.basename(filename)
         audio_path = os.path.join(cache_dir, safe_name)
         if os.path.exists(audio_path):
-            return send_file(audio_path, mimetype="audio/mpeg")
+            mime = "audio/wav" if safe_name.endswith(".wav") else "audio/mpeg"
+            return send_file(audio_path, mimetype=mime)
         return jsonify({"error": "audio not found"}), 404
 
     def _tts_toggle(self):
