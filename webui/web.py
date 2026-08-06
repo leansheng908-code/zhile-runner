@@ -379,13 +379,24 @@ class WebServer:
         # ── /free ──
         if cmd == "/free":
             try:
-                from freedom_engine import FreedomEngine
-                fe = getattr(self.core, 'freedom_engine', None)
-                if not fe:
-                    return "自由引擎未启用"
-                return fe.get_status_text()
+                fw = getattr(self.core, 'free_will', None)
+                if not fw or not fw.enabled:
+                    return "自由意志引擎未启用"
+                s = fw.status()
+                lines = [
+                    "═══ 自由意志引擎状态 ═══",
+                    f"启用: {'✅' if s.get('enabled') else '❌'}",
+                    f"沙盒文件: {s.get('sandbox_files', 0)}",
+                    f"好奇心队列: {s.get('curiosity_queue', 0)}",
+                    f"探索总数: {s.get('explorations_total', 0)}",
+                    f"预算剩余: {s.get('budget_remaining', 0)}/{s.get('budget_daily_limit', 0)}",
+                    f"拒绝总数: {s.get('declines_total', 0)} (近1h: {s.get('declines_recent_hour', 0)})",
+                    f"创作总数: {s.get('creations_total', 0)} (活跃: {s.get('creations_active', 0)})",
+                    f"修改提案: {s.get('mod_proposals_total', 0)} (待确认: {s.get('mod_proposals_pending', 0)})",
+                ]
+                return "\n".join(lines)
             except Exception as e:
-                return f"自由引擎未启用: {e}"
+                return f"自由意志引擎异常: {e}"
 
         # ── /growth ──
         if cmd == "/growth":
