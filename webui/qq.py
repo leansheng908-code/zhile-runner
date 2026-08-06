@@ -20,6 +20,12 @@ from datetime import datetime
 
 from core import ZhileCore, quality_strip
 
+try:
+    from proactive_hub import create_default_hub
+    _HAS_PROACTIVE_HUB = True
+except ImportError:
+    _HAS_PROACTIVE_HUB = False
+
 
 class QQAdapter:
     """知乐QQ适配器 — OneBot v11反向WS"""
@@ -34,6 +40,12 @@ class QQAdapter:
         self._last_proactive_time = None
         self._last_news_date = {}  # P0.33: 记录每天每个时段已推送的新闻 {window_key: "YYYY-MM-DD"}
         self._debounce_tasks = {}  # 消息防抖定时器
+
+        # P0.80: 统一主动触达引擎
+        self.proactive_hub = None
+        if _HAS_PROACTIVE_HUB:
+            self.proactive_hub = create_default_hub(core)
+            self.proactive_hub.set_send_callback(self._send_private)
 
     # ─── WS连接 ───────────────────────────────
 
@@ -336,33 +348,37 @@ class QQAdapter:
     # ─── 主动消息（P0.31） ────────────────────
 
     async def _proactive_loop(self, config: dict):
-        """后台主动消息循环 — 定期检查并发送"""
+        """P0.80: 统一主动触达引擎循环 — 委托给ProactiveHub"""
         interval = config.get("check_interval", 1800)
+
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                if self.proactive_hub and self.ws_conn:
+                    # 同步_last_proactive_time到hub
+                    self.proactive_hub._last_proactive_time = self._last_proactive_time
+                    result = await self.proactive_hub.tick()
+                    if result:
+                        self._last_proactive_time = datetime.now()
+                        # 同步news_date回qq_adapter
+                        self._last_news_date = self.proactive_hub._last_news_date
+                else:
+                    # 回退到旧逻辑（hub不可用时）
+                    await self._check_proactive_legacy(config)
+            except Exception as e:
+                print(f"  ⚠ 主动消息异常: {e}")
+
+    async def _check_proactive_legacy(self, config: dict):
+        """旧版硬编码逻辑 — 仅在ProactiveHub不可用时回退使用"""
         min_gap = config.get("min_gap_hours", 2)
         quiet_start = config.get("quiet_hours_start", 23)
         quiet_end = config.get("quiet_hours_end", 7)
         belonging_threshold = config.get("belonging_threshold", 2.0)
         min_interaction_gap = config.get("min_interaction_gap_hours", 3)
 
-        while True:
-            await asyncio.sleep(interval)
-            try:
-                await self._check_proactive(
-                    min_gap, quiet_start, quiet_end,
-                    belonging_threshold, min_interaction_gap,
-                )
-            except Exception as e:
-                print(f"  ⚠ 主动消息异常: {e}")
-
-    async def _check_proactive(
-        self, min_gap, quiet_start, quiet_end,
-        belonging_threshold, min_interaction_gap,
-    ):
-        """检查并发送一条主动消息"""
         now = datetime.now()
         hour = now.hour
 
-        # 免打扰时段
         if quiet_start <= quiet_end:
             if quiet_start <= hour < quiet_end:
                 return
@@ -370,13 +386,11 @@ class QQAdapter:
             if hour >= quiet_start or hour < quiet_end:
                 return
 
-        # 节流：距上次主动消息不足min_gap小时
         if self._last_proactive_time:
             gap_h = (now - self._last_proactive_time).total_seconds() / 3600
             if gap_h < min_gap:
                 return
 
-        # 需要NapCat已连接
         if not self.ws_conn:
             return
 
@@ -385,25 +399,20 @@ class QQAdapter:
             return
         master_id = int(master_id)
 
-        # 优先级0：对话感知关心钩子（P0.32）
         hook = self.core.pop_care_hook()
         if hook:
             message = self.core.generate_hook_message(hook)
             if message:
                 await self._send_private(master_id, message)
                 self._last_proactive_time = now
-                print(f"  🪝 关心钩子已发送 [{hook.get('topic')}]: {message[:40]}")
                 return
 
-        # 优先级1：投递"想说的话"队列
         msg = self.core.pop_want_to_say()
         if msg:
             await self._send_private(master_id, msg)
             self._last_proactive_time = now
-            print(f"  💌 主动消息已发送: {msg[:40]}")
             return
 
-        # 优先级2：PSI归属感赤字 → 生成主动关心
         if self.core.psi:
             belonging = self.core.psi.needs.get("relatedness")
             if belonging and belonging.level < belonging_threshold:
@@ -415,7 +424,6 @@ class QQAdapter:
                         gap_hours = (now - last).total_seconds() / 3600
                     except (ValueError, TypeError):
                         pass
-
                 if gap_hours >= min_interaction_gap:
                     message = self.core.generate_proactive_message(
                         belonging.level, gap_hours
@@ -423,7 +431,6 @@ class QQAdapter:
                     if message:
                         await self._send_private(master_id, message)
                         self._last_proactive_time = now
-                        print(f"  💌 主动关心已发送: {message[:40]}")
 
     # ─── P0.33: 新闻推送 ─────────────────────
 
@@ -535,9 +542,20 @@ class QQAdapter:
 
             proactive_cfg = self.core.config.get("proactive", {})
             news_cfg = self.core.config.get("news_push", {})
+
+            # P0.80: 主动触达引擎统一调度
             if proactive_cfg.get("enabled", False):
-                print(f"  💌 主动消息已启用 (P0.37核心层)")
-            if news_cfg.get("enabled", False):
+                print(f"  💌 主动消息已启用 (P0.80 统一触达引擎)")
+                # 新闻策略已注册到Hub中，无需独立_news_loop
+                # 但保留旧_news_loop作为回退（Hub不可用时）
+                if not self.proactive_hub and news_cfg.get("enabled", False):
+                    asyncio.create_task(self._news_loop(news_cfg))
+                    print(f"  📰 新闻推送回退模式已启动")
+            if self.proactive_hub and news_cfg.get("enabled", False):
+                strategy_names = [s.name for s in self.proactive_hub.strategies]
+                print(f"  📌 已注册策略: {', '.join(strategy_names)}")
+            elif news_cfg.get("enabled", False) and not proactive_cfg.get("enabled", False):
+                # 主动消息未启用但新闻已启用 → 仍跑旧news_loop
                 print(f"  📰 新闻推送已启用 (每日{news_cfg.get('push_times', [9, 16])})")
                 asyncio.create_task(self._news_loop(news_cfg))
                 print(f"  📰 新闻推送循环已启动")
