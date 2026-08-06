@@ -411,22 +411,40 @@ class WebServer:
                 sr = getattr(self.core, 'self_roadmap', None)
                 if not sr:
                     return "自研路线图未启用"
-                return sr.get_status_text()
+                ov = sr.get_overview()
+                s = ov["stats"]
+                lines = ["═══ 自研路线图 ═══",
+                         f"  总计: {s['total_ideas']} | 完成: {s['completed']} | 失败: {s['failed']}",
+                         f"  进行中: {ov['in_progress_count']} | 经验: {ov['lessons_count']}条",
+                         f"  本月自主发现: {ov['self_discovered_this_month']}/{ov['self_discovered_limit']}"]
+                if ov.get("in_progress"):
+                    lines.append("\n  📌 进行中:")
+                    for item in ov["in_progress"]:
+                        p = "🔴" if item["priority"] == "high" else "⚪"
+                        src = "👑" if item["source"] == "master_request" else "🌱"
+                        lines.append(f"    {p}{src} {item['id']} [{item['status']}] {item['title']}")
+                else:
+                    lines.append("\n  暂无进行中的idea")
+                lines.append("\n  /roadmap list | /roadmap add <描述> | /roadmap <id>")
+                return "\n".join(lines)
             except Exception as e:
                 return f"路线图查看失败: {e}"
 
         # ── /suggest ──
         if cmd == "/suggest":
             try:
-                sr = getattr(self.core, 'self_roadmap', None)
-                if not sr:
-                    return "自研路线图未启用"
-                suggestions = sr.get_suggestions()
+                if not self.core or not getattr(self.core, "plugin_suggester", None):
+                    return "PluginSuggester 未启用"
+                suggestions = self.core.suggest_list()
+                stats = self.core.suggest_stats()
+                lines = ["═══ 插件建议 ═══",
+                         f"  追踪技能: {stats.get('tracked_skills', 0)}  待处理: {stats.get('pending', 0)}  已接受: {stats.get('accepted', 0)}  已拒绝: {stats.get('dismissed', 0)}"]
                 if not suggestions:
-                    return "暂无建议，继续对话积累行为数据~"
-                lines = ["═══ 成长建议 ═══"]
-                for i, s in enumerate(suggestions[:10], 1):
-                    lines.append(f"  {i}. {s}")
+                    lines.append("  暂无待处理建议")
+                else:
+                    for i, sug in enumerate(suggestions[:10], 1):
+                        lines.append(f"\n  [{sug['id']}] {sug.get('skill_name', '?')} → {sug.get('plugin_name', '?')}")
+                        lines.append(f"    理由: {sug.get('reason', '')}")
                 return "\n".join(lines)
             except Exception as e:
                 return f"建议获取失败: {e}"
