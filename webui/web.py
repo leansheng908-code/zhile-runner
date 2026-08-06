@@ -735,11 +735,11 @@ class WebServer:
                 tts_cfg = self.core.config.get("tts", {})
                 if tts_cfg.get("auto_speak", False) and self.core.tts and full_text.strip():
                     try:
-                        result = self.core.speak(full_text.strip())
-                        if result and result.file_path and os.path.exists(result.file_path):
-                            audio_url = f"/api/tts_audio/{os.path.basename(result.file_path)}"
-                    except Exception:
-                        pass
+                        audio_path = self.core.speak(full_text.strip())
+                        if audio_path and os.path.exists(audio_path):
+                            audio_url = f"/api/tts_audio/{os.path.basename(audio_path)}"
+                    except Exception as e:
+                        print(f"[TTS] auto-speak error: {e}")
 
                 # 发送完成信号 + 更新后的状态
                 psi = self.core.get_psi_stats()
