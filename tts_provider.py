@@ -198,11 +198,146 @@ class EdgeTTSProvider(TTSProvider):
         ]]
 
 
+class GPTSoVITSProvider(TTSProvider):
+    """GPT-SoVITS — 本地语音克隆TTS，用参考音频克隆音色
+
+    需要先启动GPT-SoVITS API服务:
+        python api_v2.py -a 127.0.0.1 -p 9880
+
+    config.json 配置示例:
+        "tts": {
+            "provider": "gpt_sovits",
+            "api_url": "http://127.0.0.1:9880",
+            "ref_audio_path": "F:/voices/my_voice.wav",
+            "prompt_text": "这是我的声音样本",
+            "prompt_lang": "zh",
+            "cache_dir": "memory/tts_cache"
+        }
+    """
+
+    name = "gpt_sovits"
+    requires_local_model = True
+
+    def __init__(self, config: dict):
+        super().__init__(config)
+        self.api_url = config.get("api_url", "http://127.0.0.1:9880").rstrip("/")
+        self.ref_audio_path = config.get("ref_audio_path", "")
+        self.prompt_text = config.get("prompt_text", "")
+        self.prompt_lang = config.get("prompt_lang", "zh")
+        self.text_lang = config.get("text_lang", "zh")
+        self.speed = config.get("speed", 1.0)
+        self.base_volume = config.get("volume", 0)
+        self.base_rate = config.get("rate", 0)
+        self._requests = None
+        self._init_lib()
+
+    def _init_lib(self):
+        try:
+            import requests
+            self._requests = requests
+        except ImportError:
+            try:
+                import urllib.request as _ur
+                self._requests = "urllib"
+            except Exception:
+                self._requests = None
+
+    def is_available(self) -> bool:
+        if not self._requests:
+            return False
+        if not self.ref_audio_path or not os.path.exists(self.ref_audio_path):
+            return False
+        # 检查API是否在线
+        try:
+            import urllib.request
+            req = urllib.request.Request(f"{self.api_url}/health", method="GET")
+            urllib.request.urlopen(req, timeout=3)
+            return True
+        except Exception:
+            # /health可能不存在，尝试根路径
+            try:
+                import urllib.request
+                req = urllib.request.Request(self.api_url, method="GET")
+                urllib.request.urlopen(req, timeout=3)
+                return True
+            except Exception:
+                return False
+
+    def synthesize(self, text: str, voice: str = None, emotion: str = None, **kwargs) -> Optional[TTSResult]:
+        """调用GPT-SoVITS API合成语音"""
+        if not text.strip():
+            return None
+        if not self.ref_audio_path:
+            print("⚠ [TTS] GPT-SoVITS未配置ref_audio_path", file=sys.stderr)
+            return None
+
+        # 速度调节：基础speed + rate偏移
+        speed = self.speed
+        if self.base_rate != 0:
+            speed = max(0.5, min(2.0, speed + self.base_rate / 100.0))
+
+        # 检查缓存
+        cache_key = f"gsovits:{emotion or 'none'}:{text[:100]}"
+        cached = self._check_cache(text, cache_key)
+        if cached:
+            return TTSResult(cached, text, "gpt_sovits")
+
+        output_path = self._get_cache_path(text, cache_key)
+        # 改扩展名为wav（GPT-SoVITS默认输出wav）
+        output_path = output_path.replace(".mp3", ".wav")
+
+        payload = {
+            "text": text,
+            "text_lang": self.text_lang,
+            "ref_audio_path": self.ref_audio_path,
+            "prompt_text": self.prompt_text,
+            "prompt_lang": self.prompt_lang,
+            "text_split_method": "cut5",
+            "batch_size": 1,
+            "media_type": "wav",
+            "streaming_mode": False,
+            "speed": speed,
+        }
+
+        try:
+            if self._requests and self._requests != "urllib":
+                resp = self._requests.post(f"{self.api_url}/tts", json=payload, timeout=60)
+                if resp.status_code == 200:
+                    with open(output_path, "wb") as f:
+                        f.write(resp.content)
+                    return TTSResult(output_path, text, "gpt_sovits")
+                else:
+                    print(f"⚠ [TTS] GPT-SoVITS API返回 {resp.status_code}: {resp.text[:200]}", file=sys.stderr)
+                    return None
+            else:
+                # urllib fallback
+                import urllib.request as _ur
+                import json as _json
+                data = _json.dumps(payload).encode("utf-8")
+                req = _ur.Request(f"{self.api_url}/tts", data=data,
+                                  headers={"Content-Type": "application/json"}, method="POST")
+                resp = _ur.urlopen(req, timeout=60)
+                if resp.status == 200:
+                    with open(output_path, "wb") as f:
+                        f.write(resp.read())
+                    return TTSResult(output_path, text, "gpt_sovits")
+                else:
+                    print(f"⚠ [TTS] GPT-SoVITS API返回 {resp.status}", file=sys.stderr)
+                    return None
+        except Exception as e:
+            print(f"⚠ [TTS] GPT-SoVITS合成失败: {e}", file=sys.stderr)
+            return None
+
+    def list_voices(self) -> list:
+        return [("ref_audio", f"参考音频: {os.path.basename(self.ref_audio_path) or '未配置'}")]
+
+
 class TTSProviderFactory:
     """TTS Provider 工厂"""
 
     _providers = {
         "edge_tts": EdgeTTSProvider,
+        "gpt_sovits": GPTSoVITSProvider,
     }
 
     @classmethod
