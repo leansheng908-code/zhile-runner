@@ -631,10 +631,16 @@ class WebServer:
         # ── /forget ──
         if cmd == "/forget":
             try:
-                fts = getattr(self.core, 'forget_scheduler', None)
+                fts = getattr(self.core, 'forget_test_scheduler', None)
                 if not fts:
                     return "遗忘测试系统未启用"
-                return fts.get_status() if hasattr(fts, 'get_status') else "遗忘测试系统已启用"
+                s = fts.get_status() if hasattr(fts, 'get_status') else {}
+                if isinstance(s, dict):
+                    lines = ["═══ 遗忘测试系统 ═══"]
+                    for k, v in s.items():
+                        lines.append(f"  {k}: {v}")
+                    return "\n".join(lines)
+                return str(s) if s else "遗忘测试系统已启用"
             except Exception as e:
                 return f"遗忘测试查看失败: {e}"
 
