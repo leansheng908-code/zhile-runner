@@ -247,21 +247,17 @@ class GPTSoVITSProvider(TTSProvider):
             return False
         if not self.ref_audio_path or not os.path.exists(self.ref_audio_path):
             return False
-        # 检查API是否在线
+        # 检查API是否在线 — 任何HTTP响应(含404)都说明服务在运行
         try:
             import urllib.request
-            req = urllib.request.Request(f"{self.api_url}/health", method="GET")
+            import urllib.error
+            req = urllib.request.Request(self.api_url, method="GET")
             urllib.request.urlopen(req, timeout=3)
             return True
+        except urllib.error.HTTPError:
+            return True  # 404等也说明服务在运行
         except Exception:
-            # /health可能不存在，尝试根路径
-            try:
-                import urllib.request
-                req = urllib.request.Request(self.api_url, method="GET")
-                urllib.request.urlopen(req, timeout=3)
-                return True
-            except Exception:
-                return False
+            return False
 
     def synthesize(self, text: str, voice: str = None, emotion: str = None, **kwargs) -> Optional[TTSResult]:
         """调用GPT-SoVITS API合成语音"""
@@ -295,22 +291,25 @@ class GPTSoVITSProvider(TTSProvider):
             "text_split_method": "cut5",
             "batch_size": 1,
             "media_type": "wav",
-            "streaming_mode": False,
+            "streaming_mode": True,
             "speed": speed,
         }
 
         try:
             if self._requests and self._requests != "urllib":
-                resp = self._requests.post(f"{self.api_url}/tts", json=payload, timeout=60)
+                # 流式读取：服务器边生成边发送，减少等待
+                resp = self._requests.post(f"{self.api_url}/tts", json=payload, timeout=60, stream=True)
                 if resp.status_code == 200:
                     with open(output_path, "wb") as f:
-                        f.write(resp.content)
+                        for chunk in resp.iter_content(chunk_size=8192):
+                            if chunk:
+                                f.write(chunk)
                     return TTSResult(output_path, text, "gpt_sovits")
                 else:
                     print(f"⚠ [TTS] GPT-SoVITS API返回 {resp.status_code}: {resp.text[:200]}", file=sys.stderr)
                     return None
             else:
-                # urllib fallback
+                # urllib fallback — 也支持流式读取
                 import urllib.request as _ur
                 import json as _json
                 data = _json.dumps(payload).encode("utf-8")
@@ -319,7 +318,11 @@ class GPTSoVITSProvider(TTSProvider):
                 resp = _ur.urlopen(req, timeout=60)
                 if resp.status == 200:
                     with open(output_path, "wb") as f:
-                        f.write(resp.read())
+                        while True:
+                            chunk = resp.read(8192)
+                            if not chunk:
+                                break
+                            f.write(chunk)
                     return TTSResult(output_path, text, "gpt_sovits")
                 else:
                     print(f"⚠ [TTS] GPT-SoVITS API返回 {resp.status}", file=sys.stderr)
