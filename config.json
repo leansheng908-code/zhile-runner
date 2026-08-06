@@ -384,5 +384,13 @@
       "thinking": "thinking.png",
       "neutral": "default.png"
     }
+  },
+  "asr": {
+    "enabled": true,
+    "provider": "whisper",
+    "model_size": "base",
+    "device": "auto",
+    "compute_type": "int8",
+    "language": "zh"
   }
 }
