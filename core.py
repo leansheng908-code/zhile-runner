@@ -95,6 +95,12 @@ from growth_engine import GrowthEngine
 # P0.62: Skills×Plugin 联动 Layer 2 — 插件建议器
 from plugin_suggester import PluginSuggester
 
+# P0.69: 三层睡眠系统
+from sleep_manager import SleepManager, SleepState
+from dream_scheduler import DreamScheduler
+from wake_awareness import WakeAwareness
+from wake_word import WakeWordListener
+
 # P0.24: 易经认知编码系统
 import sys as _sys, os as _os
 _yi_jing_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'yi_jing')
@@ -597,6 +603,31 @@ class ZhileCore:
             print(f"⚠ [Core] PluginSuggester 初始化失败，降级跳过: {e}")
             self.plugin_suggester = None
 
+        # ─── P0.69: 三层睡眠系统 ──────────────
+        sleep_config = self.config.get("sleep", {})
+        self.sleep_manager = SleepManager(core=self, config=sleep_config) if sleep_config.get("enabled", True) else None
+        if self.sleep_manager:
+            self.dream_scheduler = DreamScheduler(core=self)
+            self.wake_awareness = WakeAwareness(self.sleep_manager)
+            # 注册做梦回调
+            self.sleep_manager.register_dream_callback(self.dream_scheduler.run_dream)
+            # 注册唤醒回调
+            self.sleep_manager.register_wake_callback(self.wake_awareness.on_wake)
+            # 启动睡眠管理器
+            self.sleep_manager.start()
+            # 唤醒词监听器（可选）
+            ww_config = self.config.get("wake_word", {})
+            self.wake_word_listener = WakeWordListener(
+                self.sleep_manager, config=ww_config
+            ) if ww_config.get("enabled", False) else None
+            if self.wake_word_listener:
+                self.wake_word_listener.start()
+            print("[Core] SleepManager 已初始化 (三层睡眠系统)")
+        else:
+            self.dream_scheduler = None
+            self.wake_awareness = None
+            self.wake_word_listener = None
+
         # ─── UX: 消息防抖/拆分/严肃模式 ─────────
         self.serious_mode_until = 0
         self._serious_seconds = self.config.get("serious_mode_seconds", 1200)
@@ -673,6 +704,16 @@ class ZhileCore:
 
     def chat(self, message: str) -> Generator[str, None, None]:
         """发送消息，yield回复片段（流式）"""
+        # P0.69: 更新睡眠管理器交互时间
+        if self.sleep_manager:
+            self.sleep_manager.touch()
+
+        # P0.69: 注入唤醒认知提示词（如果有）
+        if self.wake_awareness and self.wake_awareness.has_pending_wake():
+            wake_prompt = self.wake_awareness.consume_wake_prompt()
+            if wake_prompt:
+                self.ctx.set_wake_awareness(wake_prompt)
+
         # P0.9: 开始观察帧
         if self.observer:
             self.observer.start_frame(message)
@@ -1397,6 +1438,59 @@ class ZhileCore:
         if not self.daemon:
             return {}
         return self.daemon.get_vitals()
+
+    # ─── P0.69: 睡眠系统 ──────────────────────
+
+    def sleep_status(self) -> dict:
+        """获取睡眠系统状态"""
+        if not self.sleep_manager:
+            return {"enabled": False}
+        status = self.sleep_manager.get_status()
+        if self.dream_scheduler:
+            status["dream"] = self.dream_scheduler.get_status()
+        if self.wake_word_listener:
+            status["wake_word"] = self.wake_word_listener.get_status()
+        return status
+
+    def sleep_wake(self, reason: str = "manual") -> dict:
+        """手动唤醒"""
+        if not self.sleep_manager:
+            return {"error": "睡眠系统未启用"}
+        self.sleep_manager.wake(reason=reason)
+        return self.sleep_manager.get_status()
+
+    def sleep_force_state(self, state: str) -> dict:
+        """强制切换睡眠状态（测试用）"""
+        if not self.sleep_manager:
+            return {"error": "睡眠系统未启用"}
+        from sleep_manager import SleepState
+        state_map = {
+            "awake": SleepState.AWAKE,
+            "light": SleepState.LIGHT,
+            "deep": SleepState.DEEP,
+            "full": SleepState.FULL,
+        }
+        target = state_map.get(state)
+        if not target:
+            return {"error": f"未知状态: {state}"}
+        if target == SleepState.AWAKE:
+            self.sleep_manager.wake(reason="manual_force")
+        else:
+            self.sleep_manager._transition_to(target, reason="manual_force")
+        return self.sleep_manager.get_status()
+
+    def sleep_set_alarm(self, hour: int, minute: int = 0) -> dict:
+        """设置闹钟"""
+        if not self.sleep_manager:
+            return {"error": "睡眠系统未启用"}
+        alarm_time = self.sleep_manager.set_alarm(hour, minute, set_by="user")
+        return {"alarm": alarm_time}
+
+    def sleep_run_dream(self) -> dict:
+        """手动触发一次做梦"""
+        if not self.dream_scheduler:
+            return {"error": "做梦调度器未启用"}
+        return self.dream_scheduler.run_dream()
 
     # ─── P0.11 Layer 2/3: 反思引擎 + PSI思考 ──
 
@@ -2598,6 +2692,12 @@ class ZhileCore:
         # P0.11: 停止守护进程
         if self.daemon:
             self.daemon.stop()
+
+        # P0.69: 停止睡眠管理器和唤醒词监听器
+        if self.wake_word_listener:
+            self.wake_word_listener.stop()
+        if self.sleep_manager:
+            self.sleep_manager.stop()
 
         # P0.60: WorkLedger 持久化（SQLite已自动持久化，此处仅记录pending状态）
         if self.provider_runtime and self.provider_runtime.ledger:
