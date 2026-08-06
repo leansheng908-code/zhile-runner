@@ -952,79 +952,42 @@ class WebServer:
         - 消费者：从队列取音频，MCI同步播放（play wait阻塞）
         - 效果：第一句1-2秒出声，后续句子在前一句播放时合成
         """
-        import threading, ctypes, time as _time, os, re as _re, queue
+        import threading, ctypes, time as _time, os
 
         def _worker():
             try:
-                # 复用core的处理逻辑：提取动作标签+清洗
-                clean_text, _ = self.core._extract_motions(text)
-                clean_text = self.core._clean_tts_text(clean_text)
-                if not clean_text:
+                print("[TTS] speak开始...", flush=True)
+                # 直接用core.speak()，它已处理分句+合成+动作标签提取
+                audio_paths = self.core.speak(text)
+                print(f"[TTS] speak返回 {len(audio_paths)} 个音频", flush=True)
+                if not audio_paths:
+                    print("[TTS] 无音频返回，可能TTS未启用或合成失败", flush=True)
                     return
 
-                sentences = _re.split(r'[。！？!?…\n]+', clean_text)
-                sentences = [s.strip() for s in sentences if s.strip() and len(s.strip()) > 1]
-                if not sentences:
-                    return
-
-                # 情绪推断
-                emotion = None
-                if self.core.psi:
-                    psi_state = {
-                        "belonging": getattr(self.core.psi, 'belonging', 3.0),
-                        "energy": getattr(self.core.psi, 'energy', 3.0),
-                        "certainty": getattr(self.core.psi, 'certainty', 3.0),
-                        "competence": getattr(self.core.psi, 'competence', 3.0),
-                        "autonomy": getattr(self.core.psi, 'autonomy', 3.0),
-                    }
-                    emotion = self.core.tts.emotion_from_psi(psi_state)
-
-                audio_queue = queue.Queue()
-
-                def _producer():
-                    """逐句合成，放入队列"""
-                    for sentence in sentences:
-                        try:
-                            result = self.core.tts.synthesize(sentence, emotion=emotion)
-                            if result and os.path.exists(result.audio_path):
-                                audio_queue.put(result.audio_path)
-                        except Exception as e:
-                            print(f"[TTS] synthesize error: {e}", file=sys.stderr)
-                    audio_queue.put(None)  # 结束信号
-
-                def _consumer():
-                    """从队列取音频，MCI同步播放"""
-                    while True:
-                        path = audio_queue.get()
-                        if path is None:
-                            break
-                        alias = None
-                        try:
-                            alias = f"tts_{int(_time.time() * 1000)}"
-                            win_path = path.replace('/', '\\')
-                            # mpegvideo类型对wav和mp3都兼容（已验证）
-                            ret = ctypes.windll.winmm.mciSendStringW(
-                                f'open "{win_path}" type mpegvideo alias {alias}', None, 0, None)
-                            if ret == 0:
-                                ctypes.windll.winmm.mciSendStringW(f'play {alias} wait', None, 0, None)
+                # 逐个MCI播放
+                for path in audio_paths:
+                    alias = None
+                    try:
+                        alias = f"tts_{int(_time.time() * 1000)}"
+                        win_path = path.replace('/', '\\')
+                        print(f"[TTS] 播放: {win_path} ({os.path.getsize(path)} bytes)", flush=True)
+                        ret = ctypes.windll.winmm.mciSendStringW(
+                            f'open "{win_path}" type mpegvideo alias {alias}', None, 0, None)
+                        if ret == 0:
+                            ctypes.windll.winmm.mciSendStringW(f'play {alias} wait', None, 0, None)
+                            ctypes.windll.winmm.mciSendStringW(f'close {alias}', None, 0, None)
+                            print("[TTS] 播放完成", flush=True)
+                        else:
+                            print(f"[TTS] MCI open失败: ret={ret}", flush=True)
+                    except Exception as e:
+                        print(f"[TTS] MCI异常: {e}", flush=True)
+                        if alias:
+                            try:
                                 ctypes.windll.winmm.mciSendStringW(f'close {alias}', None, 0, None)
-                            else:
-                                print(f"[TTS] MCI open failed: {ret} (path={win_path})", file=sys.stderr)
-                        except Exception as e:
-                            print(f"[TTS] MCI play error: {e}", file=sys.stderr)
-                            if alias:
-                                try:
-                                    ctypes.windll.winmm.mciSendStringW(f'close {alias}', None, 0, None)
-                                except Exception:
-                                    pass
-
-                p = threading.Thread(target=_producer, daemon=True)
-                c = threading.Thread(target=_consumer, daemon=True)
-                p.start()
-                c.start()
-                c.join()  # 等播放完（在工作线程内，不阻塞主线程）
+                            except Exception:
+                                pass
             except Exception as e:
-                print(f"[TTS] threaded play error: {e}", file=sys.stderr)
+                print(f"[TTS] 线程异常: {e}", flush=True)
 
         threading.Thread(target=_worker, daemon=True).start()
 
