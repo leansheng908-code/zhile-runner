@@ -1038,3 +1038,127 @@ def test_sleep_persistence():
     # 清理
     if os.path.exists(state_file):
         os.remove(state_file)
+
+
+# ═══════════════════════════════════════════
+# P0.80: 统一主动触达引擎测试
+# ═══════════════════════════════════════════
+
+def test_proactive_hub_registration():
+    """测试策略注册和优先级排序"""
+    from proactive_hub import ProactiveHub, ProactiveStrategy, create_default_hub
+
+    class MockCore:
+        def __init__(self):
+            self.psi = None
+            self.reflection_engine = None
+            self.config = {'qq': {'master_id': '123'}, 'proactive': {}, 'news_push': {}}
+            self.llm = None
+            self.care_hooks = None
+            self.web_searcher = None
+        def pop_care_hook(self): return None
+        def generate_hook_message(self, h): return None
+        def pop_want_to_say(self): return None
+        def generate_proactive_message(self, l, g): return None
+        def search_and_format_news(self): return None
+
+    hub = create_default_hub(MockCore())
+    assert len(hub.strategies) == 4
+    names = [s.name for s in hub.strategies]
+    assert names == ['care_hook', 'want_to_say', 'psi_care', 'news_push']
+    priorities = [s.priority for s in hub.strategies]
+    assert priorities == [0, 1, 3, 4]
+
+
+def test_proactive_hub_custom_strategy():
+    """测试自定义策略注册"""
+    from proactive_hub import ProactiveHub, ProactiveStrategy, create_default_hub
+
+    class MockCore:
+        def __init__(self):
+            self.psi = None
+            self.reflection_engine = None
+            self.config = {'qq': {}, 'proactive': {}, 'news_push': {}}
+            self.llm = None
+            self.care_hooks = None
+            self.web_searcher = None
+        def pop_care_hook(self): return None
+        def generate_hook_message(self, h): return None
+        def pop_want_to_say(self): return None
+        def generate_proactive_message(self, l, g): return None
+        def search_and_format_news(self): return None
+
+    class CustomStrategy(ProactiveStrategy):
+        name = "custom"
+        priority = 2
+        def should_trigger(self, ctx): return True
+        async def generate(self, ctx): return "custom msg"
+
+    hub = create_default_hub(MockCore())
+    hub.register(CustomStrategy(MockCore()))
+    assert len(hub.strategies) == 5
+    order = [s.name for s in hub.strategies]
+    assert order == ['care_hook', 'want_to_say', 'custom', 'psi_care', 'news_push']
+
+
+def test_proactive_hub_status():
+    """测试状态获取"""
+    from proactive_hub import create_default_hub
+
+    class MockCore:
+        def __init__(self):
+            self.psi = None
+            self.reflection_engine = None
+            self.config = {'qq': {}, 'proactive': {}, 'news_push': {}}
+            self.llm = None
+            self.care_hooks = None
+            self.web_searcher = None
+        def pop_care_hook(self): return None
+        def generate_hook_message(self, h): return None
+        def pop_want_to_say(self): return None
+        def generate_proactive_message(self, l, g): return None
+        def search_and_format_news(self): return None
+
+    hub = create_default_hub(MockCore())
+    status = hub.get_status()
+    assert status['strategy_count'] == 4
+    assert len(status['strategies']) == 4
+    assert status['last_proactive'] is None
+
+
+def test_proactive_context_quiet_hours():
+    """测试免打扰时段判断"""
+    from proactive_hub import ProactiveContext
+
+    ctx = ProactiveContext()
+    ctx.extra['quiet_start'] = 23
+    ctx.extra['quiet_end'] = 7
+    # 13:xx should not be quiet
+    assert ctx.is_quiet_hours == False
+    assert ctx.hours_since_proactive == 999.0
+
+
+def test_proactive_psi_strategy_trigger():
+    """测试PSI策略触发条件"""
+    from proactive_hub import PSICareStrategy, ProactiveContext
+
+    class MockNeed:
+        def __init__(self, level): self.level = level
+    class MockPSI:
+        def __init__(self):
+            self.needs = {'relatedness': MockNeed(1.5)}
+            self.last_interaction = None
+
+    class MockCore:
+        pass
+
+    strategy = PSICareStrategy(MockCore())
+    ctx = ProactiveContext()
+    ctx.psi = MockPSI()
+    ctx.extra['belonging_threshold'] = 2.0
+    ctx.extra['min_interaction_gap'] = 3
+    assert strategy.should_trigger(ctx) == True
+
+    # Test with high belonging → no trigger
+    ctx.psi.needs['relatedness'].level = 3.0
+    assert strategy.should_trigger(ctx) == False
