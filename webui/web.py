@@ -999,22 +999,14 @@ class WebServer:
                         try:
                             alias = f"tts_{int(_time.time() * 1000)}"
                             win_path = path.replace('/', '\\')
-                            mci_type = "waveaudio" if win_path.lower().endswith('.wav') else "mpegvideo"
+                            # mpegvideo类型对wav和mp3都兼容（已验证）
                             ret = ctypes.windll.winmm.mciSendStringW(
-                                f'open "{win_path}" type {mci_type} alias {alias}', None, 0, None)
+                                f'open "{win_path}" type mpegvideo alias {alias}', None, 0, None)
                             if ret == 0:
                                 ctypes.windll.winmm.mciSendStringW(f'play {alias} wait', None, 0, None)
                                 ctypes.windll.winmm.mciSendStringW(f'close {alias}', None, 0, None)
                             else:
-                                # 尝试另一种MCI类型
-                                alt_type = "mpegvideo" if mci_type == "waveaudio" else "waveaudio"
-                                ret2 = ctypes.windll.winmm.mciSendStringW(
-                                    f'open "{win_path}" type {alt_type} alias {alias}', None, 0, None)
-                                if ret2 == 0:
-                                    ctypes.windll.winmm.mciSendStringW(f'play {alias} wait', None, 0, None)
-                                    ctypes.windll.winmm.mciSendStringW(f'close {alias}', None, 0, None)
-                                else:
-                                    print(f"[TTS] MCI open failed: {ret} (path={win_path})", file=sys.stderr)
+                                print(f"[TTS] MCI open failed: {ret} (path={win_path})", file=sys.stderr)
                         except Exception as e:
                             print(f"[TTS] MCI play error: {e}", file=sys.stderr)
                             if alias:
@@ -1047,12 +1039,24 @@ class WebServer:
         return jsonify({"error": "audio not found"}), 404
 
     def _tts_toggle(self):
-        """切换自动语音开关"""
+        """切换自动语音开关（持久化到config.json）"""
         data = request.get_json() or {}
         enabled = data.get("enabled", False)
         if "tts" not in self.core.config:
             self.core.config["tts"] = {}
         self.core.config["tts"]["auto_speak"] = enabled
+        # 持久化到config.json
+        try:
+            config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config.json")
+            with open(config_path, 'r', encoding='utf-8') as f:
+                cfg = json.load(f)
+            if "tts" not in cfg:
+                cfg["tts"] = {}
+            cfg["tts"]["auto_speak"] = enabled
+            with open(config_path, 'w', encoding='utf-8') as f:
+                json.dump(cfg, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[TTS] save config error: {e}", file=sys.stderr)
         return jsonify({"auto_speak": enabled})
 
     # ─── 启动 ─────────────────────────────────
