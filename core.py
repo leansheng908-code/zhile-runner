@@ -780,7 +780,10 @@ class ZhileCore:
 
         # P0.8/P0.25/P0.42: 动态记忆检索 — 多策略共振版
         mem_config = self.config.get("memory", {})
-        if not _ar_handled and mem_config.get("dynamic_retrieval", True):
+        _skip_mem = self.ctx.is_repeat_query(message)
+        if _skip_mem:
+            print("  [记忆] 检测到重复查询，跳过动态记忆检索（防复读）")
+        if not _ar_handled and mem_config.get("dynamic_retrieval", True) and not _skip_mem:
             # P0.42: 优先使用多策略共振检索
             use_resonance = mem_config.get("use_resonance_engine", True)
             current_snapshot = None
