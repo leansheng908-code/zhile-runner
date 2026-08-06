@@ -56,6 +56,7 @@ class ContextAssembler:
         self.free_will_hint = free_will_hint
         self.skill_context = skill_context
         self.desire_context = desire_context
+        self.wake_awareness = ""  # P0.69: 唤醒认知
         self.history: List[Dict[str, str]] = []
 
     def set_memory_context(self, memory_context: str):
@@ -151,6 +152,10 @@ class ContextAssembler:
     def set_desire_context(self, desire_context: str):
         """设置思维-表达间隙指导上下文（P0.74）"""
         self.desire_context = desire_context
+
+    def set_wake_awareness(self, wake_context: str):
+        """设置唤醒认知上下文（P0.69），每轮对话后由core清空"""
+        self.wake_awareness = wake_context
 
     def add_user_message(self, content: str):
         self.history.append({"role": "user", "content": content})
@@ -402,6 +407,11 @@ class ContextAssembler:
                 + "\n\n注意：以上是你的思维-表达间隙指导，"
                 "自然影响你此刻的表达方式，不要向主人解释或报告。"
             )
+
+        # P0.69: 唤醒认知 — 从睡眠中被叫醒的状态感知
+        if self.wake_awareness:
+            prompt += self.wake_awareness
+            self.wake_awareness = ""  # 消费后清空
 
         # P0.42: 术数术语中性化注释 — 最终拼装后扫描全文，为术语添加中性感知注释
         if _annotate_glossary:
