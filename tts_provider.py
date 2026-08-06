@@ -292,7 +292,7 @@ class GPTSoVITSProvider(TTSProvider):
             "batch_size": 1,
             "media_type": "wav",
             "streaming_mode": True,
-            "speed": speed,
+            "speed_factor": speed,
         }
 
         try:
