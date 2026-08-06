@@ -79,7 +79,7 @@ class WebSearcher:
         return None
 
     def _fetch_curl(self, url: str) -> Optional[str]:
-        """用curl命令行抓取"""
+        """用curl命令行抓取（带代理失败回退）"""
         cmd = [
             self._curl, "-sL",
             "--max-time", str(self.timeout),
@@ -96,6 +96,22 @@ class WebSearcher:
                 return result.stdout.decode("utf-8", errors="ignore")
         except Exception as e:
             print(f"  ⚠ curl error: {e}")
+        # 代理失败时无代理重试
+        if self.proxy:
+            cmd_no_proxy = [
+                self._curl, "-sL",
+                "--max-time", str(self.timeout),
+                "-A", self.BROWSER_UA,
+                "-H", "Accept-Language: zh-CN,zh;q=0.9",
+                "-H", "Accept: text/html,application/xhtml+xml",
+                url,
+            ]
+            try:
+                result = subprocess.run(cmd_no_proxy, capture_output=True, timeout=self.timeout + 5)
+                if result.returncode == 0 and result.stdout:
+                    return result.stdout.decode("utf-8", errors="ignore")
+            except Exception:
+                pass
         return None
 
     def _fetch_urllib(self, url: str) -> Optional[str]:
