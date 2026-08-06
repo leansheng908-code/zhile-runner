@@ -903,3 +903,138 @@ if __name__ == "__main__":
     print("═" * 52)
 
     sys.exit(0 if failed == 0 else 1)
+
+
+# ─── P0.69: 三层睡眠系统测试 ──────────────────
+
+def test_sleep_manager_init():
+    """测试睡眠管理器初始化"""
+    from sleep_manager import SleepManager, SleepState
+    sm = SleepManager(core=None, config={
+        "light_threshold": 300,
+        "deep_threshold": 600,
+        "state_file": "/tmp/test_sleep_state.json",
+    })
+    assert sm.state == SleepState.AWAKE
+    assert sm.is_awake
+    assert not sm.is_sleeping
+    assert sm.light_threshold == 300
+    assert sm.deep_threshold == 600
+
+def test_sleep_state_transitions():
+    """测试状态转换"""
+    from sleep_manager import SleepManager, SleepState
+    from datetime import datetime, timedelta
+    sm = SleepManager(core=None, config={"state_file": "/tmp/test_sleep_state.json"})
+    
+    # 模拟空闲 → 浅睡
+    sm._last_interaction = datetime.now() - timedelta(minutes=15)
+    sm._check_transitions()
+    assert sm.state == SleepState.LIGHT
+    
+    # 浅睡 → 深睡
+    sm._state_since = datetime.now() - timedelta(minutes=40)
+    sm._last_interaction = datetime.now() - timedelta(minutes=55)
+    sm._check_transitions()
+    assert sm.state == SleepState.DEEP
+    
+    # 唤醒
+    sm.wake(reason="test")
+    assert sm.state == SleepState.AWAKE
+    assert sm._last_wake_from == SleepState.DEEP
+    assert sm._last_wake_reason == "test"
+
+def test_sleep_wake_context():
+    """测试唤醒认知生成"""
+    from sleep_manager import SleepManager, SleepState
+    from datetime import datetime, timedelta
+    sm = SleepManager(core=None, config={"state_file": "/tmp/test_sleep_state2.json"})
+    
+    # 进入浅睡再唤醒
+    sm._state = SleepState.LIGHT
+    sm._state_since = datetime.now() - timedelta(minutes=20)
+    sm.wake(reason="wake_word")
+    
+    ctx = sm.get_wake_context()
+    assert ctx["sleep_state"] == "light_sleep"
+    assert ctx["wake_reason"] == "wake_word"
+    
+    prompt = sm.get_wake_prompt()
+    assert "浅睡眠" in prompt
+    assert "叫醒" in prompt
+
+def test_sleep_alarm():
+    """测试闹钟设置"""
+    from sleep_manager import SleepManager
+    sm = SleepManager(core=None, config={"state_file": "/tmp/test_sleep_state3.json"})
+    
+    alarm = sm.set_alarm(8, 30, set_by="user")
+    assert "08:30" in alarm
+    assert sm._alarm is not None
+    assert sm._alarm_set_by == "user"
+    
+    sm.clear_alarm()
+    assert sm._alarm is None
+
+def test_dream_scheduler():
+    """测试做梦调度器"""
+    from dream_scheduler import DreamScheduler, DreamTaskPriority, DreamTask
+    
+    # 测试任务排序
+    task_low = DreamTask("low", DreamTaskPriority.LOW, lambda: {"ok": True})
+    task_critical = DreamTask("critical", DreamTaskPriority.CRITICAL, lambda: {"ok": True})
+    tasks = sorted([task_low, task_critical], key=lambda t: t.priority.value)
+    assert tasks[0].name == "critical"
+    assert tasks[1].name == "low"
+    
+    # 测试任务执行
+    result = task_low.execute()
+    assert result == {"ok": True}
+    assert task_low.duration >= 0
+
+def test_wake_awareness():
+    """测试唤醒认知管理器"""
+    from sleep_manager import SleepManager, SleepState
+    from wake_awareness import WakeAwareness
+    from datetime import datetime, timedelta
+    
+    sm = SleepManager(core=None, config={"state_file": "/tmp/test_sleep_state4.json"})
+    wa = WakeAwareness(sm)
+    
+    # 初始无待处理唤醒
+    assert not wa.has_pending_wake()
+    
+    # 模拟从深睡唤醒
+    sm._state = SleepState.DEEP
+    sm._state_since = datetime.now() - timedelta(minutes=30)
+    sm.wake(reason="alarm")
+    
+    # 唤醒回调应该被触发（通过register_wake_callback）
+    sm.register_wake_callback(wa.on_wake)
+    sm._state = SleepState.DEEP
+    sm._state_since = datetime.now() - timedelta(minutes=30)
+    sm.wake(reason="alarm")
+    
+    assert wa.has_pending_wake()
+    prompt = wa.consume_wake_prompt()
+    assert prompt is not None
+    assert not wa.has_pending_wake()
+
+def test_sleep_persistence():
+    """测试状态持久化"""
+    import json, os
+    from sleep_manager import SleepManager, SleepState
+    state_file = "/tmp/test_sleep_persist.json"
+    
+    sm1 = SleepManager(core=None, config={"state_file": state_file})
+    from datetime import datetime as _dt; sm1._last_interaction = _dt.now()
+    sm1._save_state()
+    
+    # 创建新实例加载状态
+    sm2 = SleepManager(core=None, config={"state_file": state_file})
+    # 重启后应该恢复到AWAKE（sleep_manager会自动从非AWAKE状态唤醒）
+    assert sm2.state == SleepState.AWAKE
+    
+    # 清理
+    if os.path.exists(state_file):
+        os.remove(state_file)
