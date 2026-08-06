@@ -99,6 +99,8 @@ class EdgeTTSProvider(TTSProvider):
     def __init__(self, config: dict):
         super().__init__(config)
         self.default_voice = config.get("voice", "xiaoyi")
+        self.base_volume = config.get("volume", 0)  # 音量调节 -100~+100
+        self.base_rate = config.get("rate", 0)      # 语速调节 -100~+100
         self._edge_tts = None
         self._init_lib()
 
@@ -120,10 +122,26 @@ class EdgeTTSProvider(TTSProvider):
         return self.VOICES.get(voice, self.VOICES["xiaoyi"])
 
     def _get_emotion_params(self, emotion: str = None) -> dict:
-        """根据情绪获取语音参数"""
+        """根据情绪获取语音参数（叠加用户配置的基础音量/语速）"""
         if not emotion:
-            return {"rate": "+0%", "pitch": "+0Hz", "volume": "+0%"}
-        return self.PSI_VOICE_MAP.get(emotion, {"rate": "+0%", "pitch": "+0Hz", "volume": "+0%"})
+            base = {"rate": "+0%", "pitch": "+0Hz", "volume": "+0%"}
+        else:
+            base = self.PSI_VOICE_MAP.get(emotion, {"rate": "+0%", "pitch": "+0Hz", "volume": "+0%"})
+
+        # 解析情绪参数中的数值，叠加用户基础配置
+        import re
+        def _parse_pct(s):
+            m = re.match(r'([+-]\d+)%', s)
+            return int(m.group(1)) if m else 0
+
+        final_volume = max(-100, min(100, _parse_pct(base["volume"]) + self.base_volume))
+        final_rate = max(-100, min(100, _parse_pct(base["rate"]) + self.base_rate))
+
+        return {
+            "rate": f"{final_rate:+d}%",
+            "pitch": base["pitch"],  # pitch不叠加，保持情绪原始值
+            "volume": f"{final_volume:+d}%",
+        }
 
     def synthesize(self, text: str, voice: str = None, emotion: str = None, **kwargs) -> Optional[TTSResult]:
         """使用Edge TTS合成语音
