@@ -369,6 +369,8 @@ class CLI:
             self._handle_destiny(parts)
         elif main_cmd == "/sleep":
             self._handle_sleep(parts)
+        elif main_cmd == "/tts":
+            self._handle_tts(parts)
         else:
             print(f"{Color.DIM}未知命令，输入 /help 查看可用命令{Color.RESET}")
 
@@ -3346,6 +3348,7 @@ class CLI:
         print(f"  {Color.CYAN}/work retry <id>{Color.RESET}   重试失败任务")
         print(f"  {Color.CYAN}/approve <id> <yes|no>{Color.RESET} 手动审批操作")
         print(f"  {Color.CYAN}/pending{Color.RESET}            查看待审批列表")
+        print(f"  {Color.CYAN}/tts <文本>{Color.RESET}          TTS语音合成")
         print(f"  {Color.CYAN}/exit{Color.RESET}              退出（自动保存）")
 
     def _print_welcome(self):
@@ -3519,3 +3522,82 @@ class CLI:
             print(f"  /sleep dream   — 手动触发做梦")
             print(f"  /sleep alarm <时> [分] — 设闹钟")
             print(f"  /sleep force <state>   — 强制切换状态")
+
+    def _handle_tts(self, parts):
+        """处理 /tts 命令 — TTS语音合成"""
+        Color = self.Color
+        status = self.core.get_tts_status()
+
+        if not status["enabled"]:
+            print(f"{Color.YELLOW}TTS未启用。在config.json中添加 tts 段并设置 enabled=true{Color.RESET}")
+            print(f"{Color.DIM}需要先安装: pip install edge-tts{Color.RESET}")
+            return
+
+        if not status["available"]:
+            print(f"{Color.RED}TTS Provider不可用，请检查依赖{Color.RESET}")
+            print(f"{Color.DIM}Edge TTS: pip install edge-tts{Color.RESET}")
+            return
+
+        if len(parts) < 2 or parts[1] in ("status", ""):
+            print(f"\n{Color.CYAN}🗣️ TTS语音合成状态{Color.RESET}")
+            print(f"  Provider: {Color.GREEN}{status['provider']}{Color.RESET}")
+            print(f"  可用音色:")
+            for voice_id, desc in status.get("voices", []):
+                print(f"    {Color.CYAN}{voice_id}{Color.RESET} — {desc}")
+            print(f"\n{Color.DIM}用法:{Color.RESET}")
+            print(f"  /tts <文本>       — 合成语音")
+            print(f"  /tts voice <名称> — 切换音色")
+            print(f"  /tts status       — 查看状态")
+            return
+
+        sub = parts[1]
+        if sub == "voice":
+            if len(parts) < 3:
+                current = self.core.config.get("tts", {}).get("voice", "xiaoyi")
+                print(f"当前音色: {Color.CYAN}{current}{Color.RESET}")
+                print(f"可用音色:")
+                for voice_id, desc in status.get("voices", []):
+                    marker = " ←" if voice_id == current else ""
+                    print(f"  {Color.CYAN}{voice_id}{Color.RESET} — {desc}{marker}")
+                print(f"\n{Color.DIM}用法: /tts voice <音色名>{Color.RESET}")
+                return
+            voice_name = parts[2]
+            # 更新配置
+            if "tts" not in self.core.config:
+                self.core.config["tts"] = {}
+            self.core.config["tts"]["voice"] = voice_name
+            # 重新初始化
+            from tts_provider import TTSEngine
+            self.core.tts = TTSEngine(self.core.config["tts"])
+            print(f"{Color.GREEN}✅ 音色已切换为: {voice_name}{Color.RESET}")
+            return
+
+        # 合成语音
+        text = " ".join(parts[1:])
+        if not text.strip():
+            print(f"{Color.DIM}请输入要合成的文本: /tts <文本>{Color.RESET}")
+            return
+
+        print(f"{Color.DIM}正在合成语音...{Color.RESET}")
+        audio_path = self.core.speak(text)
+        if audio_path:
+            print(f"{Color.GREEN}✅ 语音合成完成{Color.RESET}")
+            print(f"  文件: {audio_path}")
+            # 尝试播放
+            try:
+                import platform as _pf
+                sys_name = _pf.system()
+                if sys_name == "Windows":
+                    import subprocess
+                    subprocess.Popen(["start", "", audio_path], shell=True)
+                elif sys_name == "Darwin":
+                    import subprocess
+                    subprocess.Popen(["afplay", audio_path])
+                else:
+                    import subprocess
+                    subprocess.Popen(["aplay", audio_path])
+                print(f"{Color.DIM}正在播放...{Color.RESET}")
+            except Exception:
+                print(f"{Color.DIM}（自动播放失败，请手动打开文件）{Color.RESET}")
+        else:
+            print(f"{Color.RED}❌ 语音合成失败{Color.RESET}")
