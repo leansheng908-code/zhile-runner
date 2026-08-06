@@ -10,6 +10,7 @@ P0.8升级：每条用户消息都会做实体匹配→扩散激活→动态召�
 
 import json
 import time
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Generator, Optional, Tuple
