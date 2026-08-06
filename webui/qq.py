@@ -539,5 +539,7 @@ class QQAdapter:
                 print(f"  💌 主动消息已启用 (P0.37核心层)")
             if news_cfg.get("enabled", False):
                 print(f"  📰 新闻推送已启用 (每日{news_cfg.get('push_times', [9, 16])})")
+                asyncio.create_task(self._news_loop(news_cfg))
+                print(f"  📰 新闻推送循环已启动")
 
             await asyncio.Future()  # run forever
