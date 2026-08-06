@@ -14,9 +14,9 @@ PAGE_HTML = r"""<!DOCTYPE html>
 <style>
 :root {
   /* ─── 暖色猫娘色彩系统 ─── */
-  --bg: #1a1520;            /* 深暖褐 */
-  --bg-card: #251e2a;       /* 卡片暖灰 */
-  --bg-input: #2a2230;      /* 暖深紫输入框 */
+  --bg: #2a1f30;            /* 暖紫褐（提亮） */
+  --bg-card: #352a3c;       /* 卡片暖紫（提亮） */
+  --bg-input: #3a2f42;      /* 暖深紫输入框（提亮） */
   --pink: #ff8fab;           /* 暖橙粉 */
   --pink-dim: #d4738a;       /* 暗橙粉 */
   --pink-glow: rgba(255,143,171,0.15);
@@ -36,11 +36,14 @@ PAGE_HTML = r"""<!DOCTYPE html>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
   font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background-color: var(--bg);
   background: var(--bg);
   color: var(--text);
   height: 100vh;
   display: flex;
   overflow: hidden;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 /* ─── 猫尾巴装饰（侧边栏顶部） ─── */
@@ -304,6 +307,9 @@ body {
   white-space: pre-wrap;
   position: relative;
   box-shadow: var(--shadow);
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
 }
 
 /* 知乐消息 — 左对齐 + 左上猫耳三角 */
