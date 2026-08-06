@@ -9,12 +9,13 @@ Flask服务器，提供聊天界面 + PSI生命体征面板 + API端点
 import json
 import os
 import sys
+import tempfile
 from flask import Flask, request, Response, jsonify, send_file
 
 from core import ZhileCore
 from webui.web_template import PAGE_HTML
 from avatar import AvatarManager
-
+from asr_provider import ASREngine
 
 class WebServer:
     """知乐Web服务器"""
@@ -26,6 +27,9 @@ class WebServer:
         self.port = port
         self.app = Flask(__name__)
         self.avatar = AvatarManager(core.config if core else {})
+        # ASR 引擎
+        asr_config = core.config.get("asr", {}) if core else {}
+        self.asr = ASREngine(asr_config)
         self._setup_routes()
 
     def _setup_routes(self):
@@ -50,6 +54,8 @@ class WebServer:
         self.app.add_url_rule("/api/avatar", "avatar", self._get_avatar)
         self.app.add_url_rule("/api/tts_audio/<path:filename>", "tts_audio", self._tts_audio)
         self.app.add_url_rule("/api/tts_toggle", "tts_toggle", self._tts_toggle, methods=["POST"])
+        self.app.add_url_rule("/api/asr", "asr", self._asr_transcribe, methods=["POST"])
+        self.app.add_url_rule("/api/asr_status", "asr_status", self._asr_status)
 
     # ─── 页面 ─────────────────────────────────
 
@@ -1050,6 +1056,62 @@ class WebServer:
         self.core.config["tts"]["auto_speak"] = enabled
         self._save_tts_config()
         return jsonify({"auto_speak": enabled})
+
+    # ─── ASR 语音识别 ─────────────────────────
+
+    def _asr_transcribe(self):
+        """接收音频文件，返回识别文本
+
+        前端用 MediaRecorder 录音，POST 上传音频 blob
+        返回: {"text": "识别的文本", "duration_ms": 1234}
+        """
+        if not self.asr or not self.asr.enabled:
+            return jsonify({"error": "ASR未启用"}), 503
+
+        if 'audio' not in request.files:
+            return jsonify({"error": "未收到音频文件"}), 400
+
+        audio_file = request.files['audio']
+        if not audio_file or not audio_file.filename:
+            return jsonify({"error": "音频文件为空"}), 400
+
+        # 保存到临时文件
+        suffix = '.webm'
+        if audio_file.filename.endswith('.wav'):
+            suffix = '.wav'
+        elif audio_file.filename.endswith('.mp3'):
+            suffix = '.mp3'
+
+        tmp_path = os.path.join(tempfile.gettempdir(), f"asr_input_{os.getpid()}{suffix}")
+        try:
+            audio_file.save(tmp_path)
+
+            # 如果是webm，需要转wav（faster-whisper需要ffmpeg支持）
+            # faster-whisper 内部用 ffmpeg 解码，支持 webm/opus
+            result = self.asr.transcribe(tmp_path)
+            if result:
+                return jsonify({
+                    "text": result.text,
+                    "language": result.language,
+                    "duration_ms": result.duration_ms,
+                })
+            else:
+                return jsonify({"error": "识别失败"}), 500
+
+        except Exception as e:
+            print(f"[ASR] 请求处理失败: {e}", file=sys.stderr)
+            return jsonify({"error": str(e)}), 500
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+
+    def _asr_status(self):
+        """返回ASR引擎状态"""
+        if not self.asr:
+            return jsonify({"enabled": False, "available": False})
+        return jsonify(self.asr.get_status())
 
     # ─── 启动 ─────────────────────────────────
 
