@@ -1234,13 +1234,24 @@ function startConvRecording() {
           document.getElementById('input').value = data.text;
           document.getElementById('status-text').textContent = '💬 思考中...';
           await send();
-          // send()完成后sending变回false，等待一会儿再恢复监听
+
+          // 动态计算恢复延迟：如果TTS开着，需要等TTS播放完
+          let resumeDelay = VAD_RESUME_DELAY;
+          if (ttsEnabled) {
+            // 估算TTS播放时长：中文约4字/秒，+1.5s余量
+            const lastMsg = document.querySelector('.messages .zhile:last-child');
+            const respLen = lastMsg ? lastMsg.textContent.length : 50;
+            const estTtsMs = Math.max(2000, Math.ceil(respLen / 4) * 1000 + 1500);
+            resumeDelay = estTtsMs;
+            document.getElementById('status-text').textContent = '🔊 知乐说话中...';
+          }
+
           setTimeout(() => {
             if (convMode) {
               convPaused = false;
               document.getElementById('status-text').textContent = '🎤 正在聆听...';
             }
-          }, VAD_RESUME_DELAY);
+          }, resumeDelay);
         } else {
           // 空文本，直接恢复
           if (convMode) {
