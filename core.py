@@ -1011,6 +1011,20 @@ class ZhileCore:
         }
         messages = [proactive_hint] + messages
 
+        # P0.58: Live2D动作标签能力注入
+        motion_hint = {
+            "role": "system",
+            "content": (
+                "【系统提示】你拥有Live2D虚拟形象。可以在回复中嵌入动作标签控制身体动作：\n"
+                "{m:动作名} 触发肢体动作，{e:表情名} 切换面部表情。\n"
+                "可用动作: wave(挥手) tilt_head(歪头) happy(开心小动作) "
+                "shy(害羞遮脸) pout(鼓嘴) stretch(伸懒腰) nod(点头) shake_head(摇头)\n"
+                "可用表情: happy(开心) shy(害羞) surprised(惊讶) sad(难过) angry(生气) calm(平静)\n"
+                "规则：不是每句都加，3-5句来一个才像真人；标签放在对应文字前面；标签不会被朗读出来。"
+            )
+        }
+        messages = [motion_hint] + messages
+
         # 严肃模式注入
         _serious = self._serious_suffix()
         if _serious:
@@ -1156,7 +1170,9 @@ class ZhileCore:
                 self.observer.current_frame.boundary_level = level
 
         if full_response.strip():
-            self.ctx.add_assistant_message(full_response)
+            # P0.58: 提取动作标签供前端Live2D使用，历史存储用干净文本
+            clean_resp, self._last_motions = self._extract_motions(full_response)
+            self.ctx.add_assistant_message(clean_resp)
             if self.psi:
                 self.psi.on_assistant_response(full_response)
 
@@ -1709,6 +1725,50 @@ class ZhileCore:
 
     # ─── P0.58: TTS语音合成 ───────────────────
 
+    # ─── P0.58: Live2D动作标签系统 ─────────────
+
+    _MOTION_TAG_RE = re.compile(r'\{([me]):([^}]+)\}')
+
+    def _extract_motions(self, text: str) -> tuple:
+        """提取Live2D动作/表情标签，返回 (干净文本, 动作列表)
+
+        标签格式：{m:动作名} 或 {e:表情名}
+        动作列表元素：{"type": "motion"/"expression", "name": "wave", "pos": 字符位置}
+        pos 为标签在干净文本中的字符偏移，供前端按文字进度触发动作
+        """
+        motions = []
+        clean_parts = []
+        pos = 0
+
+        last_end = 0
+        for match in self._MOTION_TAG_RE.finditer(text):
+            clean_parts.append(text[last_end:match.start()])
+            pos += match.start() - last_end
+
+            tag_type = match.group(1)
+            tag_name = match.group(2).strip()
+            motions.append({
+                "type": "motion" if tag_type == "m" else "expression",
+                "name": tag_name,
+                "pos": pos,
+            })
+            last_end = match.end()
+
+        clean_parts.append(text[last_end:])
+        clean_text = ''.join(clean_parts)
+
+        self._last_motions = motions
+        return clean_text, motions
+
+    def get_last_motions(self) -> list:
+        """获取最近一次回复中提取的动作标签（供前端Live2D使用）"""
+        return getattr(self, '_last_motions', [])
+
+    @staticmethod
+    def strip_motion_tags(text: str) -> str:
+        """剥离所有动作/表情标签，返回纯文本（用于显示和历史存储）"""
+        return ZhileCore._MOTION_TAG_RE.sub('', text)
+
     def _clean_tts_text(self, text: str) -> str:
         """清洗TTS文本：去除颜文字、emoji、装饰符号"""
         import re
@@ -1748,6 +1808,9 @@ class ZhileCore:
         """
         if not self.tts or not self.tts.enabled:
             return None
+
+        # P0.58: 提取Live2D动作标签（标签不进入TTS）
+        text, _ = self._extract_motions(text)
 
         # 清洗文本：去除颜文字/emoji/装饰符号
         text = self._clean_tts_text(text)
