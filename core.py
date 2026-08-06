@@ -11,6 +11,7 @@ P0.8升级：每条用户消息都会做实体匹配→扩散激活→动态召�
 import json
 import time
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Generator, Optional, Tuple
@@ -1796,18 +1797,21 @@ class ZhileCore:
         text = re.sub(r'\s{2,}', ' ', text).strip()
         return text
 
-    def speak(self, text: str, emotion: str = None) -> Optional[str]:
-        """将文本合成为语音，返回音频文件路径
+    def speak(self, text: str, emotion: str = None) -> list:
+        """将文本合成为语音，分句合成，返回音频文件路径列表
+
+        分句合成策略：长文本拆成短句逐句合成，第一句1-2秒出声，
+        后续句子在前一句播放时合成，大幅降低首字延迟。
 
         Args:
             text: 要合成的文本
             emotion: 情绪标签（可选，自动从PSI推断）
 
         Returns:
-            音频文件路径，或None（TTS不可用/合成失败）
+            音频文件路径列表，空列表=TTS不可用/合成失败
         """
         if not self.tts or not self.tts.enabled:
-            return None
+            return []
 
         # P0.58: 提取Live2D动作标签（标签不进入TTS）
         text, _ = self._extract_motions(text)
@@ -1815,7 +1819,7 @@ class ZhileCore:
         # 清洗文本：去除颜文字/emoji/装饰符号
         text = self._clean_tts_text(text)
         if not text:
-            return None
+            return []
 
         # 如果没指定情绪，从PSI推断
         if not emotion and self.psi:
@@ -1828,10 +1832,21 @@ class ZhileCore:
             }
             emotion = self.tts.emotion_from_psi(psi_state)
 
-        result = self.tts.synthesize(text, emotion=emotion)
-        if result:
-            return result.audio_path
-        return None
+        # 分句合成：按标点拆分，每句独立合成
+        import re as _re
+        sentences = _re.split(r'[。！？!?…\n]+', text)
+        sentences = [s.strip() for s in sentences if s.strip() and len(s.strip()) > 1]
+
+        if not sentences:
+            return []
+
+        audio_paths = []
+        for sentence in sentences:
+            result = self.tts.synthesize(sentence, emotion=emotion)
+            if result and os.path.exists(result.audio_path):
+                audio_paths.append(result.audio_path)
+
+        return audio_paths
 
     def get_tts_status(self) -> dict:
         """获取TTS状态"""
