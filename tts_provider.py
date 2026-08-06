@@ -272,8 +272,8 @@ class GPTSoVITSProvider(TTSProvider):
         if self.base_rate != 0:
             speed = max(0.5, min(2.0, speed + self.base_rate / 100.0))
 
-        # 检查缓存
-        cache_key = f"gsovits:{emotion or 'none'}:{text[:100]}"
+        # 检查缓存（包含speed，否则改rate不生效）
+        cache_key = f"gsovits:{emotion or 'none'}:sp{speed:.2f}:{text[:100]}"
         cached = self._check_cache(text, cache_key)
         if cached:
             return TTSResult(cached, text, "gpt_sovits")
