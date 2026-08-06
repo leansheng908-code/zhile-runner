@@ -453,11 +453,13 @@ class WebServer:
         if cmd == "/grow":
             try:
                 if len(parts) < 2:
-                    return "用法: /grow <behavior> [growth_type]\n例如: /grow 学会了新技能 skill"
-                behavior = parts[1] if len(parts) > 1 else ""
-                growth_type = parts[2] if len(parts) > 2 else "skill"
-                result = self.core.manual_growth(behavior, growth_type)
-                return f"✓ 成长记录: {result}" if result else "成长记录失败"
+                    return "用法: /grow <能力描述>\n例如: /grow 学会用weather API查天气"
+                desc = " ".join(parts[1:])
+                result = self.core.grow_capability(desc)
+                if result.get("success"):
+                    return f"✓ 生长完成: {result.get('summary', result)}"
+                else:
+                    return f"生长失败: {result.get('error', result)}"
             except Exception as e:
                 return f"成长记录失败: {e}"
 
@@ -530,10 +532,25 @@ class WebServer:
         # ── /provider ──
         if cmd == "/provider":
             try:
-                mp = getattr(self.core, 'model_provider', None)
-                if not mp:
-                    return "模型Provider未启用，当前模型: " + str(self.core.llm.model)
-                return mp.get_status_text()
+                llm = self.core.llm
+                is_adapter = hasattr(llm, 'provider')
+                provider_type = type(llm.provider).__name__ if is_adapter else type(llm).__name__
+                lines = ["═══ 模型Provider ═══",
+                         f"  运行模式: {'插件化(ProviderFactory)' if is_adapter else 'legacy(LLMProvider)'}",
+                         f"  Provider类: {provider_type}",
+                         f"  模型: {llm.model}"]
+                if hasattr(llm, 'config'):
+                    lines.append(f"  Base URL: {llm.config.get('base_url', 'N/A')}")
+                    lines.append(f"  温度: {llm.config.get('temperature', 'N/A')}")
+                    lines.append(f"  Max Tokens: {llm.config.get('max_tokens', 'N/A')}")
+                if is_adapter:
+                    from model_provider import ProviderFactory
+                    registered = ProviderFactory().list_providers()
+                    lines.append(f"  已注册Provider: {', '.join(registered)}")
+                pr = getattr(self.core, 'provider_runtime', None)
+                if pr:
+                    lines.append(f"  ProviderRuntime: ✅ ({', '.join(pr.provider_names())})")
+                return "\n".join(lines)
             except Exception as e:
                 return f"Provider状态: {e}"
 
