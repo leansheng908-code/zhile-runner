@@ -180,10 +180,15 @@ class WebServer:
         if cmd == "/news":
             try:
                 from web_searcher import WebSearcher
-                ws = WebSearcher()
-                result = ws.fetch_interesting_news()
-                if result:
-                    return result
+                news_cfg = self.core.config.get("news_push", {})
+                ws = WebSearcher(config=news_cfg)
+                topics = news_cfg.get("topics", ["科技", "二次元", "奇闻异事", "历史"])
+                num = news_cfg.get("max_results_per_topic", 3)
+                results = ws.search_news(topics, num)
+                if results:
+                    brief = ws.format_news_brief(results, self.core.llm, news_cfg.get("user_prefs", ""))
+                    if brief:
+                        return brief
                 return "新闻获取失败，稍后再试~"
             except Exception as e:
                 return f"新闻获取失败: {e}"
