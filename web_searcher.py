@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-P0.33: 联网搜索 + 有趣新闻推送
+P0.33: 联网搜索 + 有趣新闻推送 (v3)
 
-搜索引擎：curl抓取Bing → curl抓取Sogou → curl抓取百度 → DuckDuckGo JSON API → urllib兜底
-curl优先策略：Windows 10+自带curl.exe，绕过Python SSL/代理兼容性问题。
+策略：DuckDuckGo HTML版（反爬最宽松）→ wttr.in天气API → Bing兜底
+DDG HTML版 (html.duckduckgo.com/html/) 是为非JS客户端设计的，不会拦截。
+wttr.in 是免费天气服务，直接返回天气信息，不需要搜索。
 """
 
 import re
@@ -43,7 +44,7 @@ def _test_curl(path: str) -> bool:
 
 
 class WebSearcher:
-    """联网搜索器 — curl优先 + 多引擎"""
+    """联网搜索器 — DDG HTML优先 + 天气API + Bing兜底"""
 
     BROWSER_UA = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -66,16 +67,14 @@ class WebSearcher:
 
     # ===== 抓取层 =====
 
-    def _fetch(self, url: str) -> Optional[str]:
+    def _fetch(self, url: str, min_size: int = 200) -> Optional[str]:
         """抓取URL：curl优先 → urllib兜底"""
-        # 方式1: curl（最可靠，绕过Python SSL/代理问题）
         if self._curl:
             html = self._fetch_curl(url)
-            if html and len(html) > 200:
+            if html and len(html) > min_size:
                 return html
-        # 方式2: urllib兜底
         html = self._fetch_urllib(url)
-        if html and len(html) > 200:
+        if html and len(html) > min_size:
             return html
         return None
 
@@ -96,7 +95,7 @@ class WebSearcher:
             if result.returncode == 0 and result.stdout:
                 return result.stdout.decode("utf-8", errors="ignore")
         except Exception as e:
-            print(f"  ⚠ curl失败: {e}")
+            print(f"  ⚠ curl error: {e}")
         return None
 
     def _fetch_urllib(self, url: str) -> Optional[str]:
@@ -107,15 +106,11 @@ class WebSearcher:
             "Accept-Language": "zh-CN,zh;q=0.9",
         }
         req = urllib.request.Request(url, headers=headers)
-        if self.proxy:
-            handler = urllib.request.ProxyHandler({"http": self.proxy, "https": self.proxy})
-            opener = urllib.request.build_opener(handler, urllib.request.HTTPSHandler(context=self._ssl_ctx))
-        else:
-            opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=self._ssl_ctx))
+        opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=self._ssl_ctx))
         try:
             with opener.open(req, timeout=self.timeout) as resp:
                 return resp.read().decode("utf-8", errors="ignore")
-        except Exception as e:
+        except Exception:
             return None
 
     def _fetch_json(self, url: str) -> Optional[dict]:
@@ -131,36 +126,134 @@ class WebSearcher:
                     return json.loads(result.stdout.decode("utf-8", errors="ignore"))
             except Exception:
                 pass
-        # urllib兜底
         req = urllib.request.Request(url, headers={"User-Agent": self.BROWSER_UA})
-        if self.proxy:
-            handler = urllib.request.ProxyHandler({"http": self.proxy, "https": self.proxy})
-            opener = urllib.request.build_opener(handler, urllib.request.HTTPSHandler(context=self._ssl_ctx))
-        else:
-            opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=self._ssl_ctx))
+        opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=self._ssl_ctx))
         try:
             with opener.open(req, timeout=self.timeout) as resp:
                 return json.loads(resp.read().decode("utf-8", errors="ignore"))
         except Exception:
             return None
 
+    # ===== 天气专用API =====
+
+    def _search_weather(self, query: str) -> List[Dict[str, str]]:
+        """wttr.in 天气API — 免费无需Key"""
+        # 从查询中提取地名
+        location = re.sub(r'(今天|今日|实时|预报|天气|气温|多少度|怎么样|查询|的|了)', '', query).strip()
+        if not location:
+            location = "Beijing"
+        # wttr.in 中文天气
+        url = f"https://wttr.in/{urllib.parse.quote(location)}?format=j1&lang=zh"
+        data = self._fetch_json(url)
+        if not data:
+            # 试试纯文本格式
+            url2 = f"https://wttr.in/{urllib.parse.quote(location)}?lang=zh"
+            text = self._fetch(url2, min_size=50)
+            if text:
+                # 提取关键天气信息
+                lines = [l.strip() for l in text.split('\n') if l.strip() and not l.startswith('┌') and not l.startswith('└') and not l.startswith('│') and not l.startswith(' ─')]
+                if lines:
+                    return [{"title": f"{location}天气", "snippet": ' '.join(lines[:5])[:200]}]
+            return []
+        results = []
+        try:
+            current = data.get("current_condition", [{}])[0]
+            weather_desc = current.get("lang_zh", [{}])[0].get("value", current.get("weatherDesc", [{}])[0].get("value", ""))
+            temp = current.get("temp_C", "?")
+            feels = current.get("FeelsLikeC", "?")
+            humidity = current.get("humidity", "?")
+            wind = current.get("windspeedKmph", "?")
+            results.append({
+                "title": f"{location} {weather_desc} {temp}°C",
+                "snippet": f"气温{temp}°C 体感{feels}°C 湿度{humidity}% 风速{wind}km/h",
+            })
+            # 明天预报
+            for day_data in data.get("weather", [])[1:3]:
+                date = day_data.get("date", "")
+                max_t = day_data.get("maxtempC", "?")
+                min_t = day_data.get("mintempC", "?")
+                desc = day_data.get("hourly", [{}])[4].get("lang_zh", [{}])[0].get("value", "")
+                results.append({
+                    "title": f"{date} {desc} {min_t}~{max_t}°C",
+                    "snippet": f"最高{max_t}°C 最低{min_t}°C {desc}",
+                })
+        except Exception:
+            pass
+        return results
+
+    def _is_weather_query(self, query: str) -> bool:
+        """判断是否天气查询"""
+        weather_keywords = ["天气", "气温", "温度", "多少度", "下雨", "下雪", "预报", "风", "晴", "阴", "冷不冷", "热不热"]
+        return any(kw in query for kw in weather_keywords)
+
     # ===== 搜索引擎 =====
 
     def search(self, query: str, num_results: int = 5) -> List[Dict[str, str]]:
-        """搜索：Bing → Sogou → 百度 → DDG API"""
-        for engine_name, engine_fn in [
-            ("Bing", self._search_bing),
-            ("Sogou", self._search_sogou),
-            ("百度", self._search_baidu),
-            ("DDG-API", self._search_ddg_api),
-        ]:
-            results = engine_fn(query, num_results)
+        """搜索：天气→DDG HTML→Bing"""
+        # 1. 天气查询走专用API
+        if self._is_weather_query(query):
+            results = self._search_weather(query)
             if results:
                 return results
+
+        # 2. DuckDuckGo HTML版（反爬最宽松）
+        results = self._search_ddg_html(query, num_results)
+        if results:
+            return results
+
+        # 3. Bing兜底
+        results = self._search_bing(query, num_results)
+        if results:
+            return results
+
         print(f"  ⚠ 所有搜索引擎均失败 [{query}]")
         return []
 
+    def _search_ddg_html(self, query: str, num: int) -> List[Dict[str, str]]:
+        """DuckDuckGo HTML版 — 为非JS客户端设计，不拦机器人"""
+        url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
+        html = self._fetch(url)
+        if not html:
+            print(f"  ⚠ DDG HTML抓取失败 [{query}]")
+            return []
+        results = self._parse_ddg_html(html, num)
+        if not results:
+            print(f"  ⚠ DDG HTML解析0条 (HTML {len(html)} bytes)")
+        return results
+
+    def _parse_ddg_html(self, html: str, num: int) -> List[Dict[str, str]]:
+        """解析DDG HTML搜索结果"""
+        results = []
+        # DDG HTML版结果结构: <a class="result__a" href="...">TITLE</a>
+        # <a class="result__snippet" ...>SNIPPET</a>
+        title_pattern = re.compile(r'class="result__a"[^>]*>(.*?)</a>', re.DOTALL)
+        snippet_pattern = re.compile(r'class="result__snippet"[^>]*>(.*?)</(?:a|td)>', re.DOTALL)
+
+        titles = title_pattern.findall(html)
+        snippets = snippet_pattern.findall(html)
+
+        for i in range(min(num, len(titles))):
+            title = self._strip_html(titles[i]).strip()
+            snippet = self._strip_html(snippets[i]).strip() if i < len(snippets) else ""
+            if title and len(title) > 3:
+                results.append({"title": title, "snippet": snippet[:200]})
+
+        # 备用解析模式
+        if not results:
+            blocks = re.findall(r'class="result__body"[^>]*>(.*?)(?=class="result__body"|</div>\s*</div>\s*<div)', html, re.DOTALL)
+            for block in blocks[:num]:
+                t_match = re.search(r'class="result__a"[^>]*>(.*?)</a>', block, re.DOTALL)
+                s_match = re.search(r'class="result__snippet"[^>]*>(.*?)</', block, re.DOTALL)
+                if t_match:
+                    title = self._strip_html(t_match.group(1)).strip()
+                    snippet = self._strip_html(s_match.group(1)).strip() if s_match else ""
+                    if title and len(title) > 3:
+                        results.append({"title": title, "snippet": snippet[:200]})
+
+        return results
+
     def _search_bing(self, query: str, num: int) -> List[Dict[str, str]]:
+        """Bing搜索（兜底）"""
         url = f"https://cn.bing.com/search?q={urllib.parse.quote(query)}&count={num}"
         html = self._fetch(url)
         if not html:
@@ -187,108 +280,6 @@ class WebSearcher:
             snippet = self._strip_html(snippets[i]).strip() if i < len(snippets) else ""
             if title and len(title) > 3:
                 results.append({"title": title, "snippet": snippet[:200]})
-        return results
-
-    def _search_sogou(self, query: str, num: int) -> List[Dict[str, str]]:
-        url = f"https://www.sogou.com/web?query={urllib.parse.quote(query)}&num={num}"
-        html = self._fetch(url)
-        if not html:
-            print(f"  ⚠ Sogou抓取失败 [{query}]")
-            return []
-        results = self._parse_sogou(html, num)
-        if not results:
-            print(f"  ⚠ Sogou解析0条 (HTML {len(html)} bytes)")
-        return results
-
-    def _parse_sogou(self, html: str, num: int) -> List[Dict[str, str]]:
-        results = []
-        titles = []
-        for tp in [
-            re.compile(r'<h3[^>]*class="[^"]*vr-title[^"]*"[^>]*>.*?<a[^>]*>(.*?)</a>', re.DOTALL),
-            re.compile(r'<h3[^>]*>.*?<a[^>]*>(.*?)</a>', re.DOTALL),
-        ]:
-            titles = tp.findall(html)
-            if titles:
-                break
-        snippets = []
-        for sp in [
-            re.compile(r'<p class="str-info[^"]*"[^>]*>(.*?)</p>', re.DOTALL),
-            re.compile(r'class="str-text-info"[^>]*>(.*?)</p>', re.DOTALL),
-        ]:
-            snippets = sp.findall(html)
-            if snippets:
-                break
-        for i in range(min(num, len(titles))):
-            title = self._strip_html(titles[i]).strip()
-            snippet = self._strip_html(snippets[i]).strip() if i < len(snippets) else ""
-            if title and len(title) > 3:
-                results.append({"title": title, "snippet": snippet[:200]})
-        return results
-
-    def _search_baidu(self, query: str, num: int) -> List[Dict[str, str]]:
-        url = f"https://www.baidu.com/s?wd={urllib.parse.quote(query)}&rn={num}"
-        html = self._fetch(url)
-        if not html:
-            print(f"  ⚠ 百度抓取失败 [{query}]")
-            return []
-        if len(html) < 3000:
-            print(f"  ⚠ 百度疑似反爬 (HTML {len(html)} bytes)")
-            return []
-        results = self._parse_baidu(html, num)
-        if not results:
-            print(f"  ⚠ 百度解析0条 (HTML {len(html)} bytes)")
-        return results
-
-    def _parse_baidu(self, html: str, num: int) -> List[Dict[str, str]]:
-        results = []
-        titles = []
-        for tp in [
-            re.compile(r'<h3[^>]*>\s*<a[^>]*>(.*?)</a>', re.DOTALL),
-            re.compile(r'<h3[^>]*>(.*?)</h3>', re.DOTALL),
-        ]:
-            titles = tp.findall(html)
-            if titles:
-                break
-        snippets = []
-        for sp in [
-            re.compile(r'class="content-right[^"]*"[^>]*>(.*?)</span>', re.DOTALL),
-            re.compile(r'class="c-abstract[^"]*"[^>]*>(.*?)</(?:div|span)', re.DOTALL),
-        ]:
-            snippets = sp.findall(html)
-            if snippets:
-                break
-        for i in range(min(num, len(titles))):
-            title = self._strip_html(titles[i]).strip()
-            snippet = self._strip_html(snippets[i]).strip() if i < len(snippets) else ""
-            if title and len(title) > 2:
-                results.append({"title": title, "snippet": snippet[:200]})
-        return results
-
-    def _search_ddg_api(self, query: str, num: int) -> List[Dict[str, str]]:
-        """DuckDuckGo Instant Answer API（JSON，无需解析HTML）"""
-        url = f"https://api.duckduckgo.com/?q={urllib.parse.quote(query)}&format=json&no_html=1&skip_disambig=1"
-        data = self._fetch_json(url)
-        if not data:
-            print(f"  ⚠ DDG API失败 [{query}]")
-            return []
-        results = []
-        # Abstract
-        if data.get("AbstractText"):
-            results.append({
-                "title": data.get("Heading", query),
-                "snippet": data["AbstractText"][:200],
-            })
-        # RelatedTopics
-        for topic in (data.get("RelatedTopics") or [])[:num * 2]:
-            if isinstance(topic, dict) and topic.get("Text"):
-                results.append({
-                    "title": topic.get("Text", "")[:60],
-                    "snippet": topic.get("Text", "")[:200],
-                })
-            if len(results) >= num:
-                break
-        if not results:
-            print(f"  ⚠ DDG API返回0条 [{query}]")
         return results
 
     @staticmethod
@@ -348,7 +339,7 @@ class WebSearcher:
 if __name__ == "__main__":
     import sys
     print("=" * 50)
-    print("WebSearcher 测试（curl优先）")
+    print("WebSearcher v3 测试")
     print("=" * 50)
     searcher = WebSearcher({"timeout": 15, "proxy": ""})
     query = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else "今天天气"
