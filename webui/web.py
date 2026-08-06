@@ -485,12 +485,19 @@ class WebServer:
                 ht = getattr(self.core, 'hexagram_tracker', None)
                 if not ht:
                     return "卦象系统未启用"
-                s = ht.get_status()
+                # 先更新到当前时间，再取摘要
+                ht.update_by_time()
+                s = ht.get_state_summary()
+                if s.get("status") == "未初始化":
+                    return "卦象系统未初始化"
                 lines = ["═══ 当前卦象 ═══",
-                         f"  本卦: {s.get('primary_hexagram', '?')}",
-                         f"  互卦: {s.get('mutual_hexagram', '?')}",
-                         f"  变卦: {s.get('changed_hexagram', '无')}",
-                         f"  PSI驱动: {s.get('psi_snapshot', '?')}"]
+                         f"  当前卦: {s.get('current_hexagram', '?')}",
+                         f"  二进制: {s.get('binary', '?')}",
+                         f"  更新次数: {s.get('update_count', 0)}",
+                         f"  历史变化: {s.get('history_count', 0)}次"]
+                lc = s.get('last_change')
+                if lc:
+                    lines.append(f"  上次变化: {lc.get('from_name','?')} → {lc.get('to_name','?')}")
                 return "\n".join(lines)
             except Exception as e:
                 return f"卦象查看失败: {e}"
