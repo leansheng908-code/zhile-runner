@@ -806,17 +806,19 @@ class WebServer:
                 if scan_result.get("scanned") and scan_result.get("created", 0) > 0:
                     yield f"data: {json.dumps({'growth_scan': scan_result}, ensure_ascii=False)}\n\n"
 
-                # P0.58: 自动语音合成
+                # P0.58: 自动语音合成（分句+后台顺序播放，合成与播放重叠）
                 audio_url = None
                 tts_cfg = self.core.config.get("tts", {})
                 if tts_cfg.get("auto_speak", False) and self.core.tts and full_text.strip():
                     try:
-                        audio_path = self.core.speak(full_text.strip())
-                        if audio_path and os.path.exists(audio_path):
-                            audio_url = f"/api/tts_audio/{os.path.basename(audio_path)}"
-                            # Windows桌面端：用MCI直接播放（绕过浏览器音频限制）
-                            if sys.platform == 'win32':
-                                self._play_audio_mci(audio_path)
+                        if sys.platform == 'win32':
+                            # Windows: 后台线程分句合成+MCI顺序播放，不阻塞UI
+                            self._play_sentences_threaded(full_text.strip())
+                        else:
+                            # 非Windows: 合成供前端播放
+                            audio_paths = self.core.speak(full_text.strip())
+                            if audio_paths:
+                                audio_url = f"/api/tts_audio/{os.path.basename(audio_paths[0])}"
                     except Exception as e:
                         print(f"[TTS] auto-speak error: {e}")
 
@@ -824,7 +826,8 @@ class WebServer:
                 psi = self.core.get_psi_stats()
                 status = self.core.get_status()
                 avatar = self.avatar.get_expression(psi)
-                yield f"data: {json.dumps({'done': True, 'psi': psi, 'status': status, 'avatar': avatar, 'audio_url': audio_url}, ensure_ascii=False)}\n\n"
+                motions = self.core.get_last_motions()  # P0.58: Live2D动作标签
+                yield f"data: {json.dumps({'done': True, 'psi': psi, 'status': status, 'avatar': avatar, 'audio_url': audio_url, 'motions': motions}, ensure_ascii=False)}\n\n"
             except Exception as e:
                 yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
 
@@ -917,7 +920,7 @@ class WebServer:
     # ─── TTS语音 ───────────────────────────────
 
     def _play_audio_mci(self, filepath):
-        """Windows桌面端：用MCI直接播放音频（绕过浏览器音频限制）"""
+        """Windows桌面端：用MCI直接播放单个音频（绕过浏览器音频限制）"""
         try:
             import ctypes, threading, time as _time
             alias = f"tts_{int(_time.time() * 1000)}"
@@ -937,6 +940,98 @@ class WebServer:
                 print(f"[TTS] MCI open failed: {ret}")
         except Exception as e:
             print(f"[TTS] MCI play error: {e}")
+
+    def _play_sentences_threaded(self, text):
+        """后台线程：分句合成+MCI顺序播放，合成与播放重叠，不阻塞主线程
+
+        生产者-消费者模式：
+        - 生产者：逐句调用TTS合成，放入队列
+        - 消费者：从队列取音频，MCI同步播放（play wait阻塞）
+        - 效果：第一句1-2秒出声，后续句子在前一句播放时合成
+        """
+        import threading, ctypes, time as _time, os, re as _re, queue
+
+        def _worker():
+            try:
+                # 复用core的处理逻辑：提取动作标签+清洗
+                clean_text, _ = self.core._extract_motions(text)
+                clean_text = self.core._clean_tts_text(clean_text)
+                if not clean_text:
+                    return
+
+                sentences = _re.split(r'[。！？!?…\n]+', clean_text)
+                sentences = [s.strip() for s in sentences if s.strip() and len(s.strip()) > 1]
+                if not sentences:
+                    return
+
+                # 情绪推断
+                emotion = None
+                if self.core.psi:
+                    psi_state = {
+                        "belonging": getattr(self.core.psi, 'belonging', 3.0),
+                        "energy": getattr(self.core.psi, 'energy', 3.0),
+                        "certainty": getattr(self.core.psi, 'certainty', 3.0),
+                        "competence": getattr(self.core.psi, 'competence', 3.0),
+                        "autonomy": getattr(self.core.psi, 'autonomy', 3.0),
+                    }
+                    emotion = self.core.tts.emotion_from_psi(psi_state)
+
+                audio_queue = queue.Queue()
+
+                def _producer():
+                    """逐句合成，放入队列"""
+                    for sentence in sentences:
+                        try:
+                            result = self.core.tts.synthesize(sentence, emotion=emotion)
+                            if result and os.path.exists(result.audio_path):
+                                audio_queue.put(result.audio_path)
+                        except Exception as e:
+                            print(f"[TTS] synthesize error: {e}", file=sys.stderr)
+                    audio_queue.put(None)  # 结束信号
+
+                def _consumer():
+                    """从队列取音频，MCI同步播放"""
+                    while True:
+                        path = audio_queue.get()
+                        if path is None:
+                            break
+                        alias = None
+                        try:
+                            alias = f"tts_{int(_time.time() * 1000)}"
+                            win_path = path.replace('/', '\\')
+                            mci_type = "waveaudio" if win_path.lower().endswith('.wav') else "mpegvideo"
+                            ret = ctypes.windll.winmm.mciSendStringW(
+                                f'open "{win_path}" type {mci_type} alias {alias}', None, 0, None)
+                            if ret == 0:
+                                ctypes.windll.winmm.mciSendStringW(f'play {alias} wait', None, 0, None)
+                                ctypes.windll.winmm.mciSendStringW(f'close {alias}', None, 0, None)
+                            else:
+                                # 尝试另一种MCI类型
+                                alt_type = "mpegvideo" if mci_type == "waveaudio" else "waveaudio"
+                                ret2 = ctypes.windll.winmm.mciSendStringW(
+                                    f'open "{win_path}" type {alt_type} alias {alias}', None, 0, None)
+                                if ret2 == 0:
+                                    ctypes.windll.winmm.mciSendStringW(f'play {alias} wait', None, 0, None)
+                                    ctypes.windll.winmm.mciSendStringW(f'close {alias}', None, 0, None)
+                                else:
+                                    print(f"[TTS] MCI open failed: {ret} (path={win_path})", file=sys.stderr)
+                        except Exception as e:
+                            print(f"[TTS] MCI play error: {e}", file=sys.stderr)
+                            if alias:
+                                try:
+                                    ctypes.windll.winmm.mciSendStringW(f'close {alias}', None, 0, None)
+                                except Exception:
+                                    pass
+
+                p = threading.Thread(target=_producer, daemon=True)
+                c = threading.Thread(target=_consumer, daemon=True)
+                p.start()
+                c.start()
+                c.join()  # 等播放完（在工作线程内，不阻塞主线程）
+            except Exception as e:
+                print(f"[TTS] threaded play error: {e}", file=sys.stderr)
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _tts_audio(self, filename):
         """提供TTS音频文件"""
