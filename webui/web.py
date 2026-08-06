@@ -695,7 +695,82 @@ class WebServer:
             except Exception as e:
                 return f"遗忘测试查看失败: {e}"
 
-        return None  # 不是已知命令，走正常聊天
+        # ── /tts ──
+        if cmd == "/tts":
+            tts_cfg = self.core.config.get("tts", {})
+            status = self.core.get_tts_status()
+            if not status.get("enabled"):
+                return "TTS未启用。在config.json中设置 tts.enabled=true\n需要: pip install edge-tts"
+            if not status.get("available"):
+                return "TTS Provider不可用\nEdge TTS: pip install edge-tts"
+
+            if not sub or sub == "status":
+                current_voice = tts_cfg.get("voice", "xiaoyi")
+                current_vol = tts_cfg.get("volume", 0)
+                current_rate = tts_cfg.get("rate", 0)
+                auto = tts_cfg.get("auto_speak", False)
+                lines = ["═══ TTS语音合成 ═══",
+                         f"  Provider: {status.get('provider','?')}",
+                         f"  音色: {current_voice}",
+                         f"  音量: {current_vol:+d}  语速: {current_rate:+d}",
+                         f"  自动语音: {'✅开' if auto else '❌关'}", "",
+                         "可用音色:"]
+                for vid, desc in status.get("voices", []):
+                    mark = " ←" if vid == current_voice else ""
+                    lines.append(f"  {vid} — {desc}{mark}")
+                lines += ["", "用法:",
+                          "  /tts voice <名称>  — 切换音色",
+                          "  /tts volume <数值> — 音量(-100~+100)",
+                          "  /tts rate <数值>   — 语速(-100~+100)"]
+                return "\n".join(lines)
+
+            if sub == "voice":
+                voice_name = parts[2] if len(parts) > 2 else ""
+                if not voice_name:
+                    current = tts_cfg.get("voice", "xiaoyi")
+                    lines = [f"当前音色: {current}", "可用:"]
+                    for vid, desc in status.get("voices", []):
+                        mark = " ←" if vid == current else ""
+                        lines.append(f"  {vid} — {desc}{mark}")
+                    return "\n".join(lines)
+                if "tts" not in self.core.config:
+                    self.core.config["tts"] = {}
+                self.core.config["tts"]["voice"] = voice_name
+                from tts_provider import TTSEngine
+                self.core.tts = TTSEngine(self.core.config["tts"])
+                return f"✅ 音色已切换为: {voice_name}"
+
+            if sub == "volume":
+                val = parts[2] if len(parts) > 2 else ""
+                if not val:
+                    return f"当前音量: {tts_cfg.get('volume', 0):+d}\n用法: /tts volume 20 (增大) / /tts volume -30 (减小)"
+                try:
+                    vol = max(-100, min(100, int(val)))
+                    if "tts" not in self.core.config:
+                        self.core.config["tts"] = {}
+                    self.core.config["tts"]["volume"] = vol
+                    from tts_provider import TTSEngine
+                    self.core.tts = TTSEngine(self.core.config["tts"])
+                    return f"✅ 音量已设为: {vol:+d}"
+                except ValueError:
+                    return "请输入数字(-100~+100)"
+
+            if sub == "rate":
+                val = parts[2] if len(parts) > 2 else ""
+                if not val:
+                    return f"当前语速: {tts_cfg.get('rate', 0):+d}\n用法: /tts rate 10 (加快) / /tts rate -20 (减慢)"
+                try:
+                    r = max(-100, min(100, int(val)))
+                    if "tts" not in self.core.config:
+                        self.core.config["tts"] = {}
+                    self.core.config["tts"]["rate"] = r
+                    from tts_provider import TTSEngine
+                    self.core.tts = TTSEngine(self.core.config["tts"])
+                    return f"✅ 语速已设为: {r:+d}"
+                except ValueError:
+                    return "请输入数字(-100~+100)"
+
+            return None  # 不是已知命令，走正常聊天
 
     # ─── 聊天（SSE流式） ─────────────────────
 
