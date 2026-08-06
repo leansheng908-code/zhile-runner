@@ -1267,3 +1267,67 @@ def test_content_discovery_engine():
         assert "belonging_low" in result["psi_hits"]
         assert result["annotation"] != ""
         assert "二次元" in result["profile_summary"] or "AI" in result["profile_summary"]
+
+
+# ===== P0.58 TTS Tests =====
+
+def test_tts_provider_factory():
+    """测试TTS Provider工厂"""
+    from tts_provider import TTSProviderFactory
+    providers = TTSProviderFactory.list_providers()
+    assert "edge_tts" in providers
+
+
+def test_tts_engine_disabled():
+    """测试TTS引擎禁用状态"""
+    from tts_provider import TTSEngine
+    engine = TTSEngine({"enabled": False})
+    assert engine.enabled == False
+    result = engine.synthesize("测试")
+    assert result is None
+
+
+def test_tts_edge_voices():
+    """测试Edge TTS音色列表"""
+    from tts_provider import EdgeTTSProvider
+    provider = EdgeTTSProvider({"voice": "xiaoyi"})
+    voices = provider.list_voices()
+    assert len(voices) > 0
+    # 检查推荐音色存在
+    voice_ids = [v[0] for v in voices]
+    assert "xiaoyi" in voice_ids
+    assert "xiaomeng" in voice_ids
+
+
+def test_tts_psi_emotion_mapping():
+    """测试PSI→情绪映射"""
+    from tts_provider import TTSEngine
+    engine = TTSEngine({"enabled": False})
+
+    # 能量低 → 困倦
+    emotion = engine.emotion_from_psi({"belonging": 3.0, "energy": 1.0, "certainty": 3.0, "competence": 3.0, "autonomy": 3.0})
+    assert emotion == "sleepy"
+
+    # 归属感赤字 → 关心
+    emotion = engine.emotion_from_psi({"belonging": 1.5, "energy": 3.0, "certainty": 3.0, "competence": 3.0, "autonomy": 3.0})
+    assert emotion == "caring"
+
+    # 正常 → 平静
+    emotion = engine.emotion_from_psi({"belonging": 3.0, "energy": 3.0, "certainty": 3.0, "competence": 3.0, "autonomy": 3.0})
+    assert emotion == "calm"
+
+    # 高能量+高归属 → 开心
+    emotion = engine.emotion_from_psi({"belonging": 3.5, "energy": 3.8, "certainty": 3.0, "competence": 3.0, "autonomy": 3.0})
+    assert emotion == "happy"
+
+
+def test_tts_cache_path():
+    """测试TTS缓存路径生成"""
+    from tts_provider import EdgeTTSProvider
+    provider = EdgeTTSProvider({"voice": "xiaoyi"})
+    path1 = provider._get_cache_path("你好", "zh-CN-XiaoyiNeural_none")
+    path2 = provider._get_cache_path("你好", "zh-CN-XiaoyiNeural_none")
+    path3 = provider._get_cache_path("再见", "zh-CN-XiaoyiNeural_none")
+    assert path1 == path2  # 相同文本相同音色 → 相同路径
+    assert path1 != path3  # 不同文本 → 不同路径
+    assert path1.endswith(".mp3")
