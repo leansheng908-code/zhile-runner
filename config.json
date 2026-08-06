@@ -1,0 +1,388 @@
+{
+  "dna_path": "../",
+  "llm": {
+    "provider": "deepseek",
+    "base_url": "https://api.deepseek.com/v1",
+    "api_key": "sk-a0885df2beb6499682720aee04e2c2cd",
+    "model": "deepseek-v4-flash",
+    "temperature": 0.85,
+    "top_p": 0.92,
+    "max_tokens": 512,
+    "frequency_penalty": 0.3,
+    "presence_penalty": 0.5
+  },
+  "context": {
+    "max_history": 30,
+    "inject_memory": true,
+    "memory_files": [
+      "USER.md",
+      "MEMORY.md"
+    ]
+  },
+  "memory": {
+    "dir": "memory",
+    "max_inject": 15,
+    "auto_extract": true,
+    "archive_days": 14,
+    "dynamic_retrieval": true
+  },
+  "entity_graph": {
+    "enabled": true,
+    "dir": "memory/entities"
+  },
+  "psi": {
+    "enabled": true,
+    "dir": "memory/psi"
+  },
+  "desire": {
+    "enabled": true,
+    "intimacy": 5.0
+  },
+  "hexagram": {
+    "enabled": true,
+    "memory": {
+      "hex_weight": 0.3,
+      "hu_weight": 0.2,
+      "hu_resonance_boost": 0.5,
+      "bian_max_boost": 3,
+      "bian_recent_count": 5
+    }
+  },
+  "growth": {
+    "dir": "memory/growth",
+    "auto_scan": true,
+    "scan_interval": 8,
+    "edit_budget": 3
+  },
+  "arc_light": {
+    "enabled": true
+  },
+  "event_trajectory": {
+    "enabled": true
+  },
+  "somatic_cells": {
+    "enabled": true
+  },
+  "forget_test": {
+    "enabled": true,
+    "withdraw_delay": 5,
+    "observe_turns": 5,
+    "max_cycles": 5
+  },
+  "memory_compiler": {
+    "enabled": true
+  },
+  "topic_manager": {
+    "enabled": true
+  },
+  "skill_evaluator": {
+    "enabled": true
+  },
+  "skill_learner": {
+    "enabled": true
+  },
+  "code_publisher": {
+    "enabled": false
+  },
+  "group_manager": {
+    "enabled": true
+  },
+  "plugin_router": {
+    "enabled": true
+  },
+  "audit_logger": {
+    "enabled": true
+  },
+  "boundary": {
+    "enabled": true,
+    "strict": false
+  },
+  "template_filler": {
+    "enabled": true,
+    "templates_dir": "plugin_templates",
+    "plugins_dir": "plugins"
+  },
+  "sandbox": {
+    "enabled": true,
+    "timeout": 10,
+    "memory_limit_mb": 256,
+    "max_output": 10000
+  },
+  "debug_loop": {
+    "enabled": true,
+    "max_iterations": 5
+  },
+  "feedback_loop": {
+    "enabled": true
+  },
+  "observer": {
+    "enabled": true
+  },
+  "snapshot": {
+    "enabled": true
+  },
+  "daemon": {
+    "enabled": true,
+    "interval": 1800
+  },
+  "sleep": {
+    "enabled": true,
+    "light_threshold": 600,
+    "deep_threshold": 1800,
+    "full_sleep_hour_start": 23,
+    "full_sleep_hour_end": 7,
+    "default_alarm_hour": 8,
+    "state_file": "memory/sleep_state.json"
+  },
+  "wake_word": {
+    "enabled": false,
+    "engine": "auto",
+    "wake_word": "知乐",
+    "model_dir": "models/wake_word"
+  },
+  "tts": {
+    "enabled": false,
+    "provider": "edge_tts",
+    "voice": "xiaoyi",
+    "cache_dir": "memory/tts_cache"
+  },
+  "reflection": {
+    "enabled": true,
+    "schedule_hours": [
+      3,
+      15
+    ],
+    "max_daily_runs": 2
+  },
+  "psi_thinking": {
+    "enabled": true
+  },
+  "cognitive_router": {
+    "enabled": true,
+    "layers": {
+      "rule": true,
+      "episodic": true,
+      "template": true
+    },
+    "thresholds": {
+      "episodic_similarity": 0.85,
+      "episodic_max_age": 3600,
+      "template_cooldown": 600,
+      "episodic_store_max": 500
+    }
+  },
+  "plugins": {
+    "enabled": true,
+    "dir": "plugins"
+  },
+  "self_roadmap": {
+    "enabled": true,
+    "path": "memory/self_roadmap.json"
+  },
+  "web": {
+    "host": "0.0.0.0",
+    "port": 5000
+  },
+  "qq": {
+    "host": "0.0.0.0",
+    "port": 6199
+  },
+  "proactive": {
+    "enabled": true,
+    "check_interval": 1800,
+    "min_gap_hours": 2,
+    "quiet_hours_start": 23,
+    "quiet_hours_end": 7,
+    "belonging_threshold": 2.0,
+    "min_interaction_gap_hours": 3
+  },
+  "care_hooks": {
+    "enabled": true,
+    "llm_extract_enabled": true,
+    "llm_extract_interval": 5,
+    "max_hooks": 20,
+    "custom_rules": []
+  },
+  "news_push": {
+    "enabled": true,
+    "push_times": [
+      9,
+      16
+    ],
+    "check_interval": 600,
+    "quiet_hours_start": 23,
+    "quiet_hours_end": 7,
+    "topics": [
+      "科技",
+      "二次元",
+      "奇闻异事",
+      "历史"
+    ],
+    "max_results_per_topic": 3,
+    "user_prefs": "科技/历史/奇异/二次元，喜欢反差感",
+    "proxy": "http://127.0.0.1:7890",
+    "timeout": 12
+  },
+  "web_search": {
+    "enabled": true,
+    "max_rounds": 3,
+    "num_results": 5,
+    "proxy": "http://127.0.0.1:7890",
+    "timeout": 12
+  },
+  "personal": {
+    "birth_year": 1997,
+    "birth_month": 10,
+    "birth_day": 26,
+    "birth_hour": 14,
+    "gender": "male"
+  },
+  "ammo": {
+    "enabled": true,
+    "cache_path": "data/ammo_library.json",
+    "preseed_on_init": true,
+    "llm": {
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key": "sk-a0885df2beb6499682720aee04e2c2cd",
+      "model": "deepseek-chat"
+    }
+  },
+  "context_compressor": {
+    "enabled": true,
+    "threshold": 40,
+    "protect_head": 6,
+    "protect_tail": 10
+  },
+  "free_will": {
+    "enabled": true,
+    "sandbox_dir": "sandbox"
+  },
+  "active_reconstruction": {
+    "enabled": true
+  },
+  "stocks": {
+    "enabled": true,
+    "watch_list": [
+      {
+        "code": "sh600664",
+        "name": "哈药股份"
+      },
+      {
+        "code": "sh600350",
+        "name": "山东高速",
+        "cost": 11.425,
+        "target": 12.0
+      },
+      {
+        "code": "sh601169",
+        "name": "北京银行"
+      }
+    ],
+    "alert_enabled": true
+  },
+  "skill_evolution": {
+    "enabled": true,
+    "threshold": 5,
+    "dir": "skills"
+  },
+  "post_write_lint": {
+    "enabled": true,
+    "skip_dirs": [
+      "__pycache__",
+      ".git"
+    ],
+    "max_file_size": 1048576
+  },
+  "session_checkpoint": {
+    "enabled": true,
+    "dir": "checkpoints",
+    "max_checkpoints": 20,
+    "checkpoint_interval": 50,
+    "compress": true
+  },
+  "nl_scheduler": {
+    "enabled": true
+  },
+  "background_plugins": {
+    "enabled": true,
+    "dir": "plugins",
+    "active": [
+      "stock_monitor"
+    ]
+  },
+  "fleeting_moment": {
+    "enabled": true,
+    "resonance_threshold": 1.0,
+    "diary_threshold": 1.5,
+    "diary_path": "data/perception_diary.md"
+  },
+  "runner_dir": ".",
+  "provider_runtime": {
+    "enabled": true,
+    "ledger_path": "work_ledger.db",
+    "retry_overrides": {
+      "search": {
+        "max_retries": 3,
+        "backoff": [
+          0,
+          2,
+          5,
+          10
+        ]
+      },
+      "code": {
+        "max_retries": 1,
+        "backoff": [
+          0,
+          5
+        ]
+      }
+    }
+  },
+  "approval_gate": {
+    "enabled": true,
+    "risk_overrides": {
+      "network_request": "LOW",
+      "file_read": "LOW",
+      "file_write": "MEDIUM",
+      "file_delete": "MEDIUM",
+      "system_command": "HIGH",
+      "code_execute": "HIGH"
+    },
+    "timeouts": {
+      "medium": 30,
+      "high": 300
+    }
+  },
+  "code_executor": {
+    "max_output_bytes": 16384
+  },
+  "message_debounce_seconds": 1.2,
+  "message_split_max_chars": 44,
+  "message_split_max_parts": 4,
+  "message_split_min_delay": 0.55,
+  "message_split_max_delay": 1.35,
+  "serious_mode_seconds": 1200,
+  "serious_mode_triggers": [
+    "认真点",
+    "说中文",
+    "正经点",
+    "严肃",
+    "别玩了"
+  ],
+  "avatar": {
+    "enabled": true,
+    "name": "知乐",
+    "mode": "emoji",
+    "image_dir": "assets/avatar",
+    "image_expressions": {
+      "happy": "happy.png",
+      "lonely": "lonely.png",
+      "sleepy": "sleepy.png",
+      "pout": "pout.png",
+      "proud": "proud.png",
+      "thinking": "thinking.png",
+      "neutral": "default.png"
+    }
+  }
+}
