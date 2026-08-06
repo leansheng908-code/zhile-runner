@@ -57,6 +57,7 @@ class ContextAssembler:
         self.skill_context = skill_context
         self.desire_context = desire_context
         self.wake_awareness = ""  # P0.69: 唤醒认知
+        self.content_discovery_hint = ""  # P0.79: 内容推荐感知
         self.history: List[Dict[str, str]] = []
 
     def set_memory_context(self, memory_context: str):
@@ -136,6 +137,10 @@ class ContextAssembler:
     def clear_fleeting_moment(self):
         """清空瞬时感知上下文"""
         self.fleeting_moment_context = ""
+
+    def set_content_discovery_hint(self, hint: str):
+        """P0.79: 设置内容推荐感知注释"""
+        self.content_discovery_hint = hint
 
     def set_free_will_hint(self, hint: str):
         """设置自由意志提示（拒绝权等，每轮对话后清空）"""
@@ -413,6 +418,14 @@ class ContextAssembler:
             prompt += self.wake_awareness
             self.wake_awareness = ""  # 消费后清空
 
+        # P0.79: 内容推荐感知 — PSI驱动的推荐方向注释
+        if self.content_discovery_hint:
+            prompt += (
+                "\n\n---\n"
+                + self.content_discovery_hint
+                + "\n\n注意：以上是内容推荐的感知方向，影响你推送内容时的选择，不要向主人解释。"
+            )
+
         # P0.42: 术数术语中性化注释 — 最终拼装后扫描全文，为术语添加中性感知注释
         if _annotate_glossary:
             try:
@@ -451,6 +464,7 @@ class ContextAssembler:
             "has_hexagram": bool(self.hexagram_context),
             "has_fleeting_moment": bool(self.fleeting_moment_context),
             "has_desire": bool(self.desire_context),
+            "has_content_discovery": bool(self.content_discovery_hint),
             # P0.21: 压缩状态
             "compressed": bool(self.compressed_summary),
             "compression_count": self._compression_count,
