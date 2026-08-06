@@ -1709,6 +1709,33 @@ class ZhileCore:
 
     # ─── P0.58: TTS语音合成 ───────────────────
 
+    def _clean_tts_text(self, text: str) -> str:
+        """清洗TTS文本：去除颜文字、emoji、装饰符号"""
+        import re
+        # 去除Unicode emoji范围
+        text = re.sub(
+            r'[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF'
+            r'\U0001F700-\U0001F77F\U0001F780-\U0001F7FF\U0001F800-\U0001F8FF'
+            r'\U0001F900-\U0001F9FF\U0001FA00-\U0001FA6F\U0001FA70-\U0001FAFF'
+            r'\U00002600-\U000027BF\U0001F1E0-\U0001F1FF\U00002B00-\U00002BFF'
+            r'\U0000FE00-\U0000FE0F\U0000200D]',
+            '', text
+        )
+        # 去除颜文字常见字符组合（括号内含特殊符号的）
+        # 颜文字专用字符范围
+        text = re.sub(
+            r'[｡ᴗω•ˋ▽˙ᵕ૮ᓚˊᗜ╥╯╮╰︶՞ºлªσΦψ±√∞≈≠≤≥αβγδεζηθικλμνξπρστυφχψω]'
+            r'[｡ᴗω•ˋ▽˙ᵕ૮ᓚˊᗜ╥╯╮╰︶՞ºлªσΦψ±√∞≈≠≤≥αβγδεζηθικλμνξπρστυφχψω~^☆★♪♫♬♥♡✧✦✨✿❀❁❄→←↑↓]',
+            '', text
+        )
+        # 去除剩余的装饰性符号组合
+        text = re.sub(r'[\u3000\u2728\u2729\u2764\ufe0f]+', '', text)
+        # 去除markdown格式符号
+        text = re.sub(r'[*_~`#>|]', '', text)
+        # 去除多余空白
+        text = re.sub(r'\s{2,}', ' ', text).strip()
+        return text
+
     def speak(self, text: str, emotion: str = None) -> Optional[str]:
         """将文本合成为语音，返回音频文件路径
 
@@ -1720,6 +1747,11 @@ class ZhileCore:
             音频文件路径，或None（TTS不可用/合成失败）
         """
         if not self.tts or not self.tts.enabled:
+            return None
+
+        # 清洗文本：去除颜文字/emoji/装饰符号
+        text = self._clean_tts_text(text)
+        if not text:
             return None
 
         # 如果没指定情绪，从PSI推断
