@@ -943,15 +943,14 @@ let isRecording = false;
 let asrAvailable = null; // null=未检查, true/false
 
 async function checkASR() {
-  if (asrAvailable !== null) return asrAvailable;
+  // 不缓存，每次实时检查（模型可能还在加载中）
   try {
     const resp = await fetch('/api/asr_status');
     const data = await resp.json();
-    asrAvailable = data.enabled && data.available;
+    return data.enabled && data.available;
   } catch(e) {
-    asrAvailable = false;
+    return false;
   }
-  return asrAvailable;
 }
 
 async function toggleMic() {
