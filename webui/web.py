@@ -191,10 +191,188 @@ class WebServer:
         # ── /diag ──
         if cmd == "/diag":
             try:
-                from observer import Observer
-                obs = Observer(self.core)
-                report = obs.generate_diagnostic_report()
-                return report if report else "诊断报告生成失败"
+                from datetime import datetime as _dt
+                import time as _time
+                import os as _os, sys as _sys
+                c = self.core
+                now = _dt.now()
+                results = []
+
+                def ok(name, detail=""):
+                    results.append(f"  ✅ {name}" + (f" ({detail})" if detail else ""))
+                def fail(name, detail=""):
+                    results.append(f"  ❌ {name}" + (f" ({detail})" if detail else ""))
+                def warn(name, detail=""):
+                    results.append(f"  ⚠️ {name}" + (f" ({detail})" if detail else ""))
+
+                results.append("═══ 隐藏系统深度诊断 ═══")
+                results.append(f"时间: {now.strftime('%Y-%m-%d %H:%M:%S')}\n")
+
+                # 1. 术数系统
+                results.append("── 1. 术数系统快照 ──")
+                try:
+                    _BASE = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+                    _SYS_LIST = [
+                        ("yi_jing","yi_jing","yi_jing_label_dictionary","generate_labels_from_timestamp"),
+                        ("bazi","bazi","bazi_label_dictionary","generate_labels_from_timestamp"),
+                        ("ziwei","ziwei","ziwei_label_dictionary","generate_labels_from_timestamp"),
+                        ("qimen","qimen","qimen_label_dictionary","generate_labels_from_timestamp"),
+                        ("liuren","liuren","liuren_label_dictionary","generate_labels_from_timestamp"),
+                        ("taiyi","taiyi","taiyi_label_dictionary","generate_labels_from_timestamp"),
+                        ("tongsheng","tongsheng","tongsheng_label_dictionary","generate_labels_from_timestamp"),
+                        ("zhongyi","zhongyi","zhongyi_label_dictionary","generate_labels_from_timestamp"),
+                        ("qita","qita","qita_label_dictionary","generate_labels_from_timestamp"),
+                        ("canmou","canmou","canmou_label_dictionary","generate_canmou_labels"),
+                        ("jyotish","jyotish","jyotish_label_dictionary","generate_labels_from_timestamp"),
+                        ("tarot","tarot","tarot_label_dictionary","generate_labels_from_timestamp"),
+                        ("economic_cycle","economic_cycle","economic_cycle_label_dictionary","generate_labels_from_timestamp"),
+                    ]
+                    sys_ok = 0
+                    sys_fail_list = []
+                    import inspect
+                    for sn, dn, mn, fn in _SYS_LIST:
+                        sd = _os.path.join(_BASE, dn)
+                        if sd not in _sys.path:
+                            _sys.path.insert(0, sd)
+                        try:
+                            mod = __import__(mn)
+                            func = getattr(mod, fn)
+                            sig = inspect.signature(func)
+                            params = list(sig.parameters.keys())
+                            if "dt" in params or len(params) == 1:
+                                r = func(now)
+                            elif "timestamp_str" in params:
+                                r = func(now.strftime("%Y-%m-%d %H:%M"))
+                            elif len(params) == 5:
+                                r = func(now.year, now.month, now.day, now.hour, now.minute)
+                            elif len(params) == 4:
+                                r = func(now.year, now.month, now.day, now.hour)
+                            else:
+                                r = func(now.year, now.month, now.day, now.hour, now.minute)
+                            if r: sys_ok += 1
+                            else: sys_fail_list.append(f"{sn}(空)")
+                        except Exception as e:
+                            sys_fail_list.append(f"{sn}({type(e).__name__})")
+                    if sys_ok == 13: ok(f"13/13术数系统全部存活", f"{sys_ok}/13")
+                    elif sys_ok > 0: warn("部分系统存活", f"{sys_ok}/13 失败: {', '.join(sys_fail_list)}")
+                    else: fail("术数系统全部失败", "检查lunar_python等依赖")
+                except Exception as e:
+                    fail("术数系统异常", str(e)[:60])
+
+                # 2. 共振引擎+缓存
+                results.append("\n── 2. 共振引擎+缓存 ──")
+                try:
+                    from resonance_engine import ResonanceEngine
+                    engine = ResonanceEngine()
+                    ResonanceEngine._cache_raw = None
+                    t0 = _time.perf_counter()
+                    snap = engine.generate_snapshot(now.year, now.month, now.day, now.hour, now.minute)
+                    t_cold = (_time.perf_counter() - t0) * 1000
+                    t0 = _time.perf_counter()
+                    snap2 = engine.generate_snapshot(now.year, now.month, now.day, now.hour, now.minute)
+                    t_hot = (_time.perf_counter() - t0) * 1000
+                    sys_count = len(snap) if snap else 0
+                    if sys_count >= 10: ok(f"快照生成 {sys_count}/13系统", f"冷{t_cold:.0f}ms 热{t_hot:.3f}ms")
+                    elif sys_count > 0: warn(f"快照生成 {sys_count}/13系统", f"冷{t_cold:.0f}ms")
+                    else: fail("快照生成失败", "0个系统产出")
+                    if t_hot < 1.0: ok("缓存命中", f"{t_hot:.3f}ms")
+                    else: warn("缓存未命中", f"{t_hot:.1f}ms")
+                except Exception as e:
+                    fail("共振引擎异常", str(e)[:60])
+
+                # 3. 共振计算
+                results.append("\n── 3. 共振计算 ──")
+                try:
+                    compact = engine.extract_compact_snapshot(snap)
+                    t0 = _time.perf_counter()
+                    score = engine.calculate(compact, compact)
+                    t_calc = (_time.perf_counter() - t0) * 1000
+                    if 0.5 < score < 2.5: ok("共振计算正常", f"自共振={score:.3f} ({t_calc:.2f}ms)")
+                    else: warn("共振分数异常", f"score={score:.3f}")
+                except Exception as e:
+                    fail("共振计算异常", str(e)[:60])
+
+                # 4. 瞬时感知层
+                results.append("\n── 4. 瞬时感知层(一期一会) ──")
+                try:
+                    if c.fleeting_moment:
+                        fm = c.fleeting_moment
+                        class _FakeMem:
+                            _resonance_raw = 1.8
+                            content = "诊断测试记忆"
+                            class memory:
+                                content = "诊断测试记忆"
+                        hex_info = c._hex_state.get("current", {}) if c._hex_state else None
+                        r = fm.generate([_FakeMem()], hexagram_info=hex_info)
+                        if r and r.get("descriptor"):
+                            ok("瞬时感知生成", f"档位={r.get('level','?')}")
+                        elif r is None:
+                            ok("瞬时感知跳过", "共振分低于阈值(正常)")
+                        else:
+                            warn("瞬时感知返回空", str(r)[:40])
+                    else:
+                        warn("瞬时感知未初始化")
+                except Exception as e:
+                    fail("瞬时感知异常", str(e)[:60])
+
+                # 5. 记忆系统
+                results.append("\n── 5. 记忆系统 ──")
+                try:
+                    if c.memory:
+                        stats = c.memory.get_stats()
+                        ok("记忆系统", f"总{stats.get('total',0)} 活跃{stats.get('active',0)}")
+                        if hasattr(c.memory, '_last_top_memories'):
+                            ok("共振检索属性", "_last_top_memories 已暴露")
+                        else:
+                            fail("共振检索属性缺失", "_last_top_memories 不存在")
+                    else:
+                        fail("记忆系统未初始化")
+                except Exception as e:
+                    fail("记忆系统异常", str(e)[:60])
+
+                # 6. 卦象系统
+                results.append("\n── 6. 卦象系统 ──")
+                try:
+                    if c.hexagram_tracker:
+                        state = c.hexagram_tracker.update_by_time()
+                        hex_name = state.get("current", {}).get("name", "?") if isinstance(state, dict) else "?"
+                        ok("卦象更新", f"当前={hex_name}")
+                        if c.hexagram_expression:
+                            ok("卦象感知生成器", "已初始化")
+                        else:
+                            warn("卦象感知生成器", "未初始化")
+                    else:
+                        warn("卦象系统未启用")
+                except Exception as e:
+                    fail("卦象系统异常", str(e)[:60])
+
+                # 7. PSI引擎
+                results.append("\n── 7. PSI引擎 ──")
+                try:
+                    if c.psi:
+                        stats = c.psi.get_stats()
+                        ok("PSI引擎", f"帧#{stats.get('consciousness_frame', 0)}")
+                    else:
+                        warn("PSI引擎未初始化")
+                except Exception as e:
+                    fail("PSI引擎异常", str(e)[:60])
+
+                # 8. 其他子系统
+                results.append("\n── 8. 其他核心子系统 ──")
+                for label, attr in [("认知路由器","cognitive_router"),("体细胞系统","somatic_cells"),
+                    ("弧光系统","arc_light"),("自由意志","free_will"),("成长扫描","growth"),
+                    ("记忆编译","memory_compiler"),("观察者","observer")]:
+                    if getattr(c, attr, None) is not None:
+                        ok(label, "存活")
+                    else:
+                        warn(label, "未初始化")
+
+                # 汇总
+                p = sum(1 for r in results if "✅" in r)
+                w = sum(1 for r in results if "⚠️" in r)
+                f = sum(1 for r in results if "❌" in r)
+                results.append(f"\n═══ 诊断结果: {p}✅ {w}⚠️ {f}❌ / {p+w+f}项 ═══")
+                return "\n".join(results)
             except Exception as e:
                 return f"诊断失败: {e}"
 
